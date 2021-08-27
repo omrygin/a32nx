@@ -218,7 +218,7 @@ impl SimulationElement for EngineCompressionChamberController {
     }
 }
 impl EngineCompressionChamberController {
-    const GAMMA: f64 = 1.4; // Adiabatic index of dry air
+    const HEAT_CAPACITY_RATIO: f64 = 1.4; // Adiabatic index of dry air
 
     pub fn new(
         n1_contribution_factor: f64,
