@@ -11,23 +11,16 @@ use uom::si::{
     volume_rate::cubic_meter_per_second,
 };
 
-use systems::{
-    hydraulic::Fluid,
-    overhead::{AutoOffFaultPushButton, OnOffFaultPushButton},
-    pneumatic::{
-        ApuCompressionChamberController, CompressionChamber, ConstantConsumerController,
-        ControllablePneumaticValve, ControlledPneumaticValveSignal, CrossBleedValveSelectorKnob,
-        CrossBleedValveSelectorMode, DefaultConsumer, DefaultPipe, DefaultValve,
-        EngineCompressionChamberController, EngineState, PneumaticContainer, TargetPressureSignal,
-    },
-    shared::{
+use systems::{hydraulic::Fluid, overhead::{AutoOffFaultPushButton, OnOffFaultPushButton}, pneumatic::{ApuCompressionChamberController, CompressionChamber, ConstantConsumerController, ControllablePneumaticValve, ControlledPneumaticValveSignal, CrossBleedValveSelectorKnob, CrossBleedValveSelectorMode, DefaultConsumer, DefaultPipe, DefaultValve, EngineCompressionChamberController, EngineState, PneumaticContainer, TargetPressureSignal, WingAntiIcePushButtonMode,WingAntiIcePushButton}, 
+shared::{
         ControllerSignal, EngineCorrectedN1, EngineCorrectedN2, EngineFirePushButtons,
         PneumaticValve,
-    },
-    simulation::{
+    }, simulation::{
         Read, SimulationElement, SimulationElementVisitor, SimulatorReader, SimulatorWriter, Write,
-    },
-};
+    }};
+
+mod wing_anti_ice;
+use wing_anti_ice::*;
 
 use pid::Pid;
 
@@ -164,6 +157,9 @@ pub struct A320Pneumatic {
     apu: CompressionChamber,
     apu_bleed_air_valve: DefaultValve,
     apu_bleed_air_controller: ApuCompressionChamberController,
+    
+    //Wing anti ice
+    wing_anti_ice: WingAntiIceComplex,
 }
 impl A320Pneumatic {
     pub fn new() -> Self {
@@ -183,6 +179,10 @@ impl A320Pneumatic {
             apu: CompressionChamber::new(Volume::new::<cubic_meter>(1.)),
             apu_bleed_air_valve: DefaultValve::new_closed(),
             apu_bleed_air_controller: ApuCompressionChamberController::new(),
+
+            //Wing anti ice
+            wing_anti_ice: WingAntiIceComplex::new(),
+            
         }
     }
 
@@ -236,7 +236,13 @@ impl A320Pneumatic {
 
         self.cross_bleed_valve
             .update_move_fluid(context, &mut left[0], &mut right[0]);
-    }
+
+
+        //Wing anti ice
+        self.wing_anti_ice.update_controller(overhead_panel.wing_anti_ice.mode());
+        self.wing_anti_ice.update(context,&mut self.engine_systems); 
+
+   }
 
     // TODO: Returning a mutable reference here is not great. I was running into an issue with the update order:
     // - The APU turbine must know about the bleed valve being open as soon as possible to update EGT properly
@@ -526,7 +532,7 @@ impl ControllerSignal<PressureRegulatingValveSignal> for BleedMonitoringComputer
     }
 }
 
-struct EngineBleedAirSystem {
+pub struct EngineBleedAirSystem {
     number: usize,
     ip_compression_chamber_controller: EngineCompressionChamberController,
     hp_compression_chamber_controller: EngineCompressionChamberController,
@@ -571,6 +577,7 @@ impl EngineBleedAirSystem {
                 cubic_meter_per_second,
             >(0.1)),
             es_valve: DefaultValve::new(Ratio::new::<ratio>(0.)),
+
         }
     }
 
@@ -601,7 +608,7 @@ impl EngineBleedAirSystem {
         self.engine_starter_consumer
             .update(&self.engine_starter_consumer_controller);
 
-        // Update valves (open amount)
+      // Update valves (open amount)
         self.ip_valve.update_open_amount(ipv_controller);
         self.hp_valve.update_open_amount(hpv_controller);
         self.pr_valve.update_open_amount(prv_controller);
@@ -774,6 +781,7 @@ pub struct A320PneumaticOverheadPanel {
     cross_bleed: CrossBleedValveSelectorKnob,
     engine_1_bleed: AutoOffFaultPushButton,
     engine_2_bleed: AutoOffFaultPushButton,
+    wing_anti_ice: WingAntiIcePushButton, 
 }
 impl A320PneumaticOverheadPanel {
     pub fn new() -> Self {
@@ -782,6 +790,7 @@ impl A320PneumaticOverheadPanel {
             cross_bleed: CrossBleedValveSelectorKnob::new_auto(),
             engine_1_bleed: AutoOffFaultPushButton::new_auto("PNEU_ENG_1_BLEED"),
             engine_2_bleed: AutoOffFaultPushButton::new_auto("PNEU_ENG_2_BLEED"),
+            wing_anti_ice: WingAntiIcePushButton::new_off(),
         }
     }
 
@@ -791,6 +800,13 @@ impl A320PneumaticOverheadPanel {
 
     pub fn cross_bleed_mode(&self) -> CrossBleedValveSelectorMode {
         self.cross_bleed.mode()
+    }
+
+    pub fn wing_anti_ice_is_on(&self) -> bool {
+        match self.wing_anti_ice.mode() {
+            WingAntiIcePushButtonMode::Off => false,
+            _ => true
+        }
     }
 
     pub fn engine_bleed_pb_is_auto(&self, engine_number: usize) -> bool {
@@ -815,7 +831,7 @@ impl SimulationElement for A320PneumaticOverheadPanel {
         self.cross_bleed.accept(visitor);
         self.engine_1_bleed.accept(visitor);
         self.engine_2_bleed.accept(visitor);
-
+        self.wing_anti_ice.accept(visitor);
         visitor.visit(self);
     }
 }
@@ -1056,6 +1072,12 @@ mod tests {
             self
         }
 
+        fn wing_anti_ice_push_button(mut self, mode: WingAntiIcePushButtonMode) -> Self {
+            self.write("BUTTON_OVHD_ANTI_ICE_WING_Position",mode);
+
+            self
+        }
+
         fn for_both_engine_systems<T: Fn(&EngineBleedAirSystem) -> ()>(&self, func: T) {
             self.query(|a| a.pneumatic.engine_systems.iter().for_each(|sys| func(sys)));
         }
@@ -1110,6 +1132,14 @@ mod tests {
 
         fn apu_bleed_valve_is_open(&self) -> bool {
             self.query(|a| a.pneumatic.apu_bleed_air_valve.is_open())
+        }
+
+        fn left_wai_valve_is_open(&self) -> bool {
+            self.query(|a| a.pneumatic.wing_anti_ice.is_left_wai_valve_open())
+        }
+
+        fn right_wai_valve_is_open(&self) -> bool {
+            self.query(|a| a.pneumatic.wing_anti_ice.is_right_wai_valve_open())
         }
 
         fn set_engine_bleed_push_button_off(mut self, number: usize) -> Self {
@@ -1707,5 +1737,6 @@ mod tests {
                 CrossBleedValveSelectorMode::Shut
             );
         }
+        
     }
 }
