@@ -239,8 +239,7 @@ impl A320Pneumatic {
 
 
         //Wing anti ice
-        self.wing_anti_ice.update_controller(overhead_panel.wing_anti_ice.mode());
-        self.wing_anti_ice.update(context,&mut self.engine_systems); 
+        self.wing_anti_ice.update(context,&mut self.engine_systems,overhead_panel.wing_anti_ice.mode()); 
 
    }
 

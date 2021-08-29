@@ -22,92 +22,6 @@ use super::*;
 
 
 
-
-
-
-//Begin WAI valve block
-/*The valve itself is a DefaultValve. The only thing
- * we need to re-implement is the controller, that sets
- * whether or not the valve should be open.
- *
- * The controller works using signals. A signal basically
- * tells the controlloer what fraction of the valve should
- * be open. Each valve has an `update_open_amount` method,
- * that accepts a controller that implements the 
- * `ControllerSignal` trait. This trait has a single method,
- * which returns an option for the signal type (e.g. wing anti ice signal)
- * depending on the button/selector position.
- *
- **/
-
-//A WAI valve signal, just indicates what fraction
-//of the valve should be open
-struct WingAntiIceValveSignal {
-    target_open_amount: Ratio,
-}
-
-//We can create a signal to be 100% open,
-//totally closed, or potentially something in between
-impl WingAntiIceValveSignal {
-    pub fn new(target_open_amount: Ratio) -> Self {
-        Self { target_open_amount }
-    }
-
-    pub fn new_open() -> Self {
-        Self::new(Ratio::new::<percent>(100.))
-    }
-
-    pub fn new_closed() -> Self {
-        Self::new(Ratio::new::<percent>(0.))
-    }
-
-}
-
-//A controlled valve signal. This just lets us access the target amount
-impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
-    fn target_open_amount(&self) -> Ratio {
-        self.target_open_amount
-    }
-}
-
-//This is the actual controller. It holds the push button status.
-//In the future, this should also hold the 30 seconds on ground
-//logic.
-pub struct WingAntiIceValveController {
-    wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
-}
-
-impl WingAntiIceValveController {
-    pub fn new() -> Self {
-        Self {
-            wing_anti_ice_button_pos: WingAntiIcePushButtonMode::Off,
-       }
-    
-    }
-    
-    pub fn update (
-        &mut self,
-        wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
-    ) {
-        self.wing_anti_ice_button_pos = wing_anti_ice_button_pos;
-    }
-}
-
-//This is the part that interacts with the valve, via DefaultValve.update_open_amount.
-//That method has if let Some(signal) = controller.signal(). The right hand side
-//is what is returned from this implementation.
-impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
-    fn signal(&self) -> Option<WingAntiIceValveSignal> {
-        match self.wing_anti_ice_button_pos {
-            WingAntiIcePushButtonMode::Off => Some(WingAntiIceValveSignal::new_closed()),
-            WingAntiIcePushButtonMode::On => Some(WingAntiIceValveSignal::new_open()),
-        }
-    }
-}
-
-//End WAI valve block
-
-
 //Begin StaticExhaust block
 /* This is actually not specific for the wing anti ice,
  * and should be attached to any consumer that exhausts 
@@ -168,6 +82,100 @@ impl StaticExhaust {
 
 
 //End StaticExhaust block
+
+
+
+//Begin WAI valve block
+/*The valve itself is a DefaultValve. The only thing
+ * we need to re-implement is the controller, that sets
+ * whether or not the valve should be open.
+ *
+ * The controller works using signals. A signal basically
+ * tells the controlloer what fraction of the valve should
+ * be open. Each valve has an `update_open_amount` method,
+ * that accepts a controller that implements the 
+ * `ControllerSignal` trait. This trait has a single method,
+ * which returns an option for the signal type (e.g. wing anti ice signal)
+ * depending on the button/selector position.
+ *
+ **/
+
+//A WAI valve signal, just indicates what fraction
+//of the valve should be open
+struct WingAntiIceValveSignal {
+    target_open_amount: Ratio,
+}
+
+//We can create a signal to be 100% open,
+//totally closed, or potentially something in between
+impl WingAntiIceValveSignal {
+    pub fn new(target_open_amount: Ratio) -> Self {
+        Self { target_open_amount }
+    }
+
+    pub fn new_open() -> Self {
+        Self::new(Ratio::new::<percent>(100.))
+    }
+
+    pub fn new_closed() -> Self {
+        Self::new(Ratio::new::<percent>(0.))
+    }
+
+}
+
+//A controlled valve signal. This just lets us access the target amount
+impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
+    fn target_open_amount(&self) -> Ratio {
+        self.target_open_amount
+    }
+}
+
+//This is the actual controller. It holds the push button status.
+//In the future, this should also hold the 30 seconds on ground
+//logic.
+pub struct WingAntiIceValveController {
+    wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
+    valve_pid: Pid<f64>,
+    valve_pid_output: f64,
+}
+
+impl WingAntiIceValveController {
+    pub fn new() -> Self {
+        Self {
+            wing_anti_ice_button_pos: WingAntiIcePushButtonMode::Off,
+            valve_pid: Pid::new(0.,0.01,0.,1.,1.,1.,1.,22.),
+            valve_pid_output: 0.,
+
+       }
+    
+    }
+    
+    pub fn update (
+        &mut self,
+        wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
+    ) {
+        self.wing_anti_ice_button_pos = wing_anti_ice_button_pos;
+    }
+}
+
+//This is the part that interacts with the valve, via DefaultValve.update_open_amount.
+//That method has if let Some(signal) = controller.signal(). The right hand side
+//is what is returned from this implementation.
+impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
+    fn signal(&self) -> Option<WingAntiIceValveSignal> {
+        match self.wing_anti_ice_button_pos {
+            WingAntiIcePushButtonMode::Off => Some(WingAntiIceValveSignal::new_closed()),
+            WingAntiIcePushButtonMode::On => {
+                Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
+                            self.valve_pid_output.max(0.).min(1.))))
+            },
+        }
+    }
+}
+
+//End WAI valve block
+
+
 
 
 //Begin WAI Consumer block
@@ -233,7 +241,9 @@ pub struct WingAntiIceComplex {
     right_wai_valve: DefaultValve,
     right_wai_consumer: WingAntiIceConsumer,
 
-    valve_controller: WingAntiIceValveController,
+    left_valve_controller: WingAntiIceValveController,
+    right_valve_controller: WingAntiIceValveController,
+
 
 }
 
@@ -248,12 +258,16 @@ impl WingAntiIceComplex {
             right_wai_valve: DefaultValve::new_closed(),
             right_wai_consumer: WingAntiIceConsumer::new(Volume::new::<cubic_meter>(1.)),
 
-            valve_controller: WingAntiIceValveController::new(),
+            left_valve_controller: WingAntiIceValveController::new(),
+            right_valve_controller: WingAntiIceValveController::new(),
          }
     }
 
-    pub fn update_controller(&mut self,wai_mode: WingAntiIcePushButtonMode) {
-        self.valve_controller.update(wai_mode);
+    fn update_left_controller(&mut self,wai_mode: WingAntiIcePushButtonMode) {
+        self.left_valve_controller.update(wai_mode);
+    }
+    fn update_right_controller(&mut self,wai_mode: WingAntiIcePushButtonMode) {
+        self.right_valve_controller.update(wai_mode);
     }
 
     pub fn is_left_wai_valve_open(&self) -> bool {
@@ -285,11 +299,25 @@ impl WingAntiIceComplex {
         &mut self,
         context: &UpdateContext,
         engine_systems: &mut [EngineBleedAirSystem; 2],
+        wai_mode: WingAntiIcePushButtonMode,
     ) {
         //First, we see if the valve's open amount changes this update,
         //as a result of a change in the ovhd panel push button.
-        self.left_wai_valve.update_open_amount(&self.valve_controller);
-        self.right_wai_valve.update_open_amount(&self.valve_controller);
+        self.left_valve_controller.valve_pid_output = 
+            self.left_valve_controller.valve_pid.next_control_output(
+               self.left_wai_consumer_pressure().get::<psi>(),
+            )
+            .output;
+        self.right_valve_controller.valve_pid_output = 
+            self.right_valve_controller.valve_pid.next_control_output(
+               self.right_wai_consumer_pressure().get::<psi>(),
+            )
+            .output;
+        
+        self.update_left_controller(wai_mode);
+        self.update_right_controller(wai_mode);
+        self.left_wai_valve.update_open_amount(&self.left_valve_controller);
+        self.right_wai_valve.update_open_amount(&self.right_valve_controller);
 
         //An exhaust tick always happens, no matter what 
         //the valve's state is
@@ -316,6 +344,8 @@ impl WingAntiIceComplex {
     }
 
 }
+
+
 
 impl SimulationElement for WingAntiIceComplex {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
@@ -559,6 +589,10 @@ mod tests {
             self.query(|a| a.pneumatic.engine_systems[number-1].regulated_temperature())
         }
 
+        fn left_valve_open_amount(&self) -> f64 {
+            self.query(|a| a.pneumatic.wing_anti_ice.left_wai_valve.open_amount().get::<ratio>())
+        }
+
 
     }
 
@@ -570,7 +604,7 @@ mod tests {
     #[test]
     fn wing_anti_ice_pressurized() {
 
-        let altitude = Length::new::<foot>(10000.);
+        let altitude = Length::new::<foot>(0.);
         let ambient_pressure = ISA::pressure_at_altitude(altitude);
         let pressure_epsilon = Pressure::new::<psi>(0.01);
 
@@ -598,55 +632,24 @@ mod tests {
     }
 
     #[test]
-    fn wing_anti_ice_valve_allows_air() {
-        let altitude = Length::new::<foot>(1000.);
+    fn wing_anti_ice_pressure_regulated() {
+        let altitude = Length::new::<foot>(0.);
         let ambient_pressure = ISA::pressure_at_altitude(altitude);
-        let pressure_epsilon = Pressure::new::<psi>(0.01);
-
+        
         let mut test_bed = test_bed()
             .in_isa_atmosphere(altitude)
-            .idle_eng1()
-            .idle_eng2();
+            .power_eng1()
+            .power_eng2()
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize().and_stabilize();
 
-        test_bed = test_bed.and_stabilize();
-
-        assert!((test_bed.left_wai_pressure() - ambient_pressure).abs() < pressure_epsilon);
-        assert!((test_bed.right_wai_pressure() - ambient_pressure).abs() < pressure_epsilon);
-
-        test_bed = test_bed
-            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
-
-        test_bed.run_with_delta(Duration::from_secs(5));
-
-        assert!(test_bed.left_wai_pressure() > ambient_pressure);
-        assert!(test_bed.right_wai_pressure() > ambient_pressure);
-
+        println!("left pressure = {}",test_bed.left_wai_pressure().get::<psi>());
+        println!("regulated pressure = {}", test_bed.regulated_pressure(1).get::<psi>());
+        println!("right pressure = {}",test_bed.right_wai_pressure().get::<psi>());
+        println!("regulated pressure = {}", test_bed.regulated_pressure(2).get::<psi>());
+        assert!(1>1);
 
     }
-
-    #[test]
-    fn wing_anti_ice_pressure_smaller_than_regulated() {
-        let altitude = Length::new::<foot>(1000.);
-        let ambient_pressure = ISA::pressure_at_altitude(altitude);
-
-        let mut test_bed = test_bed()
-            .in_isa_atmosphere(altitude)
-            .idle_eng1()
-            .idle_eng2().and_stabilize();
-
-        assert!(test_bed.left_wai_pressure() < test_bed.regulated_pressure(1));
-        assert!(test_bed.right_wai_pressure() < test_bed.regulated_pressure(2));
-
-        test_bed = test_bed
-            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
-        test_bed.run_with_delta(Duration::from_secs(5));
-
-
-        assert!(test_bed.left_wai_pressure() < test_bed.regulated_pressure(1));
-        assert!(test_bed.right_wai_pressure() < test_bed.regulated_pressure(2));
-
-    }
-
     
     #[test]
     fn wing_anti_ice_temperature() {
