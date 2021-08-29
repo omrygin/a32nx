@@ -265,7 +265,7 @@ impl SimulationElement for A320Pneumatic {
         }
 
         self.fadec.accept(visitor);
-
+        self.wing_anti_ice.accept(visitor);
         visitor.visit(self);
     }
 
@@ -275,6 +275,8 @@ impl SimulationElement for A320Pneumatic {
             "APU_BLEED_AIR_VALVE_OPEN",
             self.apu_bleed_air_valve.is_open(),
         );
+        writer.write("LEFT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_left_wai_valve_open());
+        writer.write("RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_right_wai_valve_open());
     }
 }
 
@@ -1505,6 +1507,13 @@ mod tests {
         assert!(test_bed.contains_key("OVHD_PNEU_ENG_2_BLEED_PB_IS_AUTO"));
 
         assert!(test_bed.contains_key("PNEU_XBLEED_VALVE_OPEN"));
+
+        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
+        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
+        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_VALVE_OPEN"));
+        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_VALVE_OPEN"));
+        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
+        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
     }
 
     #[test]
