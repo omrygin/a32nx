@@ -1,4 +1,5 @@
 use core::panic;
+use std::time::Duration;
 
 use crate::UpdateContext;
 
@@ -137,27 +138,57 @@ pub struct WingAntiIceValveController {
     wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
     valve_pid: Pid<f64>,
     valve_pid_output: f64,
+    is_on_ground: bool,
+    system_test_timer: Duration,
+    system_test_done: bool,
 }
 
 impl WingAntiIceValveController {
+    const WAI_TEST_TIME: Duration = Duration::from_secs(30);
+    const IS_ON_GROUND_SIMVAR: &'static str = "SIM ON GROUND";
     pub fn new() -> Self {
         Self {
             wing_anti_ice_button_pos: WingAntiIcePushButtonMode::Off,
             valve_pid: Pid::new(0.,0.01,0.,1.,1.,1.,1.,22.),
             valve_pid_output: 0.,
-
+            is_on_ground: true,
+            system_test_timer: Duration::from_secs(0),
+            system_test_done: false,
        }
     
     }
     
     pub fn update (
         &mut self,
+        context: &UpdateContext,
         wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
     ) {
         self.wing_anti_ice_button_pos = wing_anti_ice_button_pos;
+        if self.wing_anti_ice_button_pos == WingAntiIcePushButtonMode::On {
+            if self.is_on_ground && self.system_test_done == false {
+                self.system_test_timer += context.delta();
+                self.system_test_timer = self.system_test_timer.min(Self::WAI_TEST_TIME);
+                if self.system_test_timer == Self::WAI_TEST_TIME {
+                    self.system_test_done = true;
+                }
+            }
+        }
+
+        if self.is_on_ground == false {
+            self.system_test_timer = Duration::from_secs(0);
+        }
+    }
+
+    pub fn get_timer(&self) -> Duration {
+        self.system_test_timer
     }
 }
 
+impl SimulationElement for WingAntiIceValveController {
+    fn read(&mut self, reader: &mut SimulatorReader) {
+        self.is_on_ground = reader.read(&Self::IS_ON_GROUND_SIMVAR);
+    }
+}
 //This is the part that interacts with the valve, via DefaultValve.update_open_amount.
 //That method has if let Some(signal) = controller.signal(). The right hand side
 //is what is returned from this implementation.
@@ -166,8 +197,12 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
         match self.wing_anti_ice_button_pos {
             WingAntiIcePushButtonMode::Off => Some(WingAntiIceValveSignal::new_closed()),
             WingAntiIcePushButtonMode::On => {
-                Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
-                            self.valve_pid_output.max(0.).min(1.))))
+                if self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false) {
+                    Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
+                                self.valve_pid_output.max(0.).min(1.))))
+                } else {
+                    Some(WingAntiIceValveSignal::new_closed())
+                }
             },
         }
     }
@@ -263,11 +298,11 @@ impl WingAntiIceComplex {
          }
     }
 
-    fn update_left_controller(&mut self,wai_mode: WingAntiIcePushButtonMode) {
-        self.left_valve_controller.update(wai_mode);
+    fn update_left_controller(&mut self,context: &UpdateContext, wai_mode: WingAntiIcePushButtonMode) {
+        self.left_valve_controller.update(context,wai_mode);
     }
-    fn update_right_controller(&mut self,wai_mode: WingAntiIcePushButtonMode) {
-        self.right_valve_controller.update(wai_mode);
+    fn update_right_controller(&mut self, context: &UpdateContext, wai_mode: WingAntiIcePushButtonMode) {
+        self.right_valve_controller.update(context, wai_mode);
     }
 
     pub fn is_left_wai_valve_open(&self) -> bool {
@@ -314,8 +349,8 @@ impl WingAntiIceComplex {
             )
             .output;
         
-        self.update_left_controller(wai_mode);
-        self.update_right_controller(wai_mode);
+        self.update_left_controller(context,wai_mode) ;
+        self.update_right_controller(context,wai_mode);
         self.left_wai_valve.update_open_amount(&self.left_valve_controller);
         self.right_wai_valve.update_open_amount(&self.right_valve_controller);
 
@@ -351,6 +386,8 @@ impl SimulationElement for WingAntiIceComplex {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
     where
             Self: Sized, {
+        self.left_valve_controller.accept(visitor);
+        self.right_valve_controller.accept(visitor);
         visitor.visit(self);
     }
 
@@ -565,6 +602,10 @@ mod tests {
             self
         }
 
+        fn is_sim_on_ground(&mut self) -> bool {
+            self.read("SIM ON GROUND")
+        }
+
         //Utility functions to get info from the test bed
         fn left_wai_pressure(&self) -> Pressure {
             self.query(|a| a.pneumatic.wing_anti_ice.left_wai_consumer_pressure())
@@ -592,6 +633,19 @@ mod tests {
         fn left_valve_open_amount(&self) -> f64 {
             self.query(|a| a.pneumatic.wing_anti_ice.left_wai_valve.open_amount().get::<ratio>())
         }
+
+        fn right_valve_open_amount(&self) -> f64 {
+            self.query(|a| a.pneumatic.wing_anti_ice.right_wai_valve.open_amount().get::<ratio>())
+        }
+
+        fn left_valve_controller_timer(&self) -> Duration {
+            self.query(|a| a.pneumatic.wing_anti_ice.left_valve_controller.get_timer())
+        }
+
+        fn right_valve_controller_timer(&self) -> Duration {
+            self.query(|a| a.pneumatic.wing_anti_ice.right_valve_controller.get_timer())
+        }
+ 
 
 
     }
@@ -684,14 +738,103 @@ mod tests {
         assert!(1==2);
     }
 
+    #[test]
+    fn simulator_on_ground() {
+        let mut test_bed = test_bed();
+       assert!(!test_bed.is_sim_on_ground());
+        test_bed.set_on_ground(true);
+        assert!(test_bed.is_sim_on_ground());
+    }
+
+    #[test]
+    fn wing_anti_ice_valve_close_after_30_seconds_on_ground () {
+        let mut test_bed = test_bed()
+            .idle_eng1()
+            .idle_eng2()
+            .in_isa_atmosphere(Length::new::<foot>(0.))
+            .and_stabilize();
+        test_bed.set_on_ground(true);
+        
+        assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
+        assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(0));
+
+        test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
+        test_bed.run_with_delta(Duration::from_secs(1));
+        
+        assert!(test_bed.left_valve_open_amount()>0.);
+        assert!(test_bed.left_valve_controller_timer() ==  Duration::from_secs(1));
+        assert!(test_bed.right_valve_open_amount()>0.);
+        assert!(test_bed.right_valve_controller_timer() ==  Duration::from_secs(1));
+
+        test_bed.run_with_delta(Duration::from_secs(30));
+        assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(30));
+        assert!(test_bed.left_valve_open_amount() == 0.);
+        assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(30));
+        assert!(test_bed.right_valve_open_amount() == 0.);
 
 
 
+    }
+
+    fn wing_anti_ice_valve_open_after_leaving_ground_after_test() {
+        let altitude = Length::new::<foot>(500.);
+        let mut test_bed = test_bed()
+            .idle_eng1()
+            .idle_eng2()
+            .in_isa_atmosphere(Length::new::<foot>(0.))
+            .and_stabilize();
+        test_bed.set_on_ground(true);
+
+        test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
+        test_bed.run_with_delta(Duration::from_secs(31));
+
+        assert!(test_bed.left_valve_open_amount() == 0.);
+        assert!(test_bed.right_valve_open_amount() == 0.);
+
+        test_bed = test_bed
+                .in_isa_atmosphere(altitude)
+                .power_eng1()
+                .power_eng2()
+                .and_stabilize();
+        test_bed.set_on_ground(false);
+        test_bed.run_with_delta(Duration::from_secs(1));
+
+        assert!(test_bed.left_valve_open_amount() > 0.);
+        assert!(test_bed.right_valve_open_amount() > 0.);
+        assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
+        assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(0));
+
+    }
+
+    fn wing_anti_ice_valve_controller_timer_starts_after_landing() {
+        let altitude = Length::new::<foot>(500.);
+        let mut test_bed = test_bed()
+            .idle_eng1()
+            .idle_eng2()
+            .in_isa_atmosphere(altitude)
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize();
+        test_bed.set_on_ground(false);
+
+        assert!(test_bed.left_valve_open_amount() > 0.);
+        assert!(test_bed.right_valve_open_amount() > 0.);
+        assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
+        assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(0));
+
+        test_bed.set_on_ground(true);
+        test_bed.run_with_delta(Duration::from_millis(500));
+
+        assert!(test_bed.left_valve_open_amount() > 0.);
+        assert!(test_bed.right_valve_open_amount() > 0.);
+        assert!(test_bed.left_valve_controller_timer() > Duration::from_secs(0));
+        assert!(test_bed.right_valve_controller_timer() > Duration::from_secs(0));
+        
+        test_bed.run_with_delta(Duration::from_secs(30));
+        assert!(test_bed.left_valve_open_amount() == 0.);
+        assert!(test_bed.right_valve_open_amount() == 0.);
 
 
-
-
-
+    }
 
 
 }
