@@ -92,11 +92,7 @@ impl DefaultPipe {
         // There is no powf function for SI quantities (even without units)...
         self.temperature *= (1. + volume.get::<cubic_meter>() / self.volume.get::<cubic_meter>())
             .powf(Self::HEAT_CAPACITY_RATIO - 1.);
-    }
-    fn update_temperautre_for_pressure_change(&mut self, delta_pressure: Pressure) {
-        self.temperature *= ((self.pressure.get::<psi>() + delta_pressure.get::<psi>())/self.pressure.get::<psi>())
-            .powf(1.-1./Self::HEAT_CAPACITY_RATIO);
-    }
+    } 
 
     fn vol_to_target(&self, target_press: Pressure) -> Volume {
         (target_press - self.pressure()) * self.volume() / self.fluid.bulk_mod()
@@ -1206,33 +1202,6 @@ mod tests {
             assert_eq!(read_mode, CrossBleedValveSelectorMode::Open);
         }
     }
-    mod wing_anti_ice_push_button {
-        use super::*;
-        
-        #[test]
-        fn button_modes_are_represented_as_simvar_integers() {
-            let mut test_bed = SimulationTestBed::from(WingAntiIcePushButton::new_off());
 
-            test_bed.write("BUTTON_OVHD_ANTI_ICE_WING_Position",0);
-            test_bed.run();
-
-            let read_mode: WingAntiIcePushButtonMode =
-                test_bed.read("BUTTON_OVHD_ANTI_ICE_WING_Position");
-            assert_eq!(read_mode,WingAntiIcePushButtonMode::Off);
-            
-            test_bed.write("BUTTON_OVHD_ANTI_ICE_WING_Position",1);
-            test_bed.run();
-
-            let read_mode: WingAntiIcePushButtonMode =
-                test_bed.read("BUTTON_OVHD_ANTI_ICE_WING_Position");
-
-            assert_eq!(read_mode,WingAntiIcePushButtonMode::On);
-
-
-
-        }
-
-
-
-    }
 }
+
