@@ -134,13 +134,17 @@ impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
 //This is the actual controller. It holds the push button status.
 //AUG29 - Implemented pressure regulation using PID. Need to tweak
 //AUG30 - Implemented the 30 second on ground test mechanism
+//AUG31 - After 30 seconds, the ON light would turn off.
+//        After takeoff, it should be turned on again.
 pub struct WingAntiIceValveController {
-    wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
-    valve_pid: Pid<f64>,
-    valve_pid_output: f64,
-    is_on_ground: bool,
-    system_test_timer: Duration,
-    system_test_done: bool,
+    wing_anti_ice_button_pos: WingAntiIcePushButtonMode, //The position of the button
+    valve_pid: Pid<f64>, //PID controller for the valve - to regulate pressure
+    valve_pid_output: f64, //Output of the PID controller - open_amount
+    is_on_ground: bool, //Needed for the 30 seconds test logic
+    system_test_timer: Duration, //Timer to count up to 30 seconds
+    system_test_done: bool, //Timer reached 30 seconds while on the ground
+    pushbutton_should_light_on: bool, //If button is pushed and the test is finished
+                                        //the ON light should turn off.
 }
 
 impl WingAntiIceValveController {
@@ -154,6 +158,7 @@ impl WingAntiIceValveController {
             is_on_ground: true,
             system_test_timer: Duration::from_secs(0),
             system_test_done: false,
+            pushbutton_should_light_on: false,
        }
     
     }
@@ -170,9 +175,15 @@ impl WingAntiIceValveController {
                 self.system_test_timer = self.system_test_timer.min(Self::WAI_TEST_TIME);
                 if self.system_test_timer == Self::WAI_TEST_TIME {
                     self.system_test_done = true;
+                    self.pushbutton_should_light_on = false;
+                } else {
+                    self.pushbutton_should_light_on = true;
                 }
+            } else if self.is_on_ground == false {
+                self.pushbutton_should_light_on = true;
             }
         }
+        
         //If the plane has took off, we reset the timer
         //and set test_done to false in order for the 
         //mechanism to work when landing.
@@ -182,6 +193,7 @@ impl WingAntiIceValveController {
         }
     }
 
+
     pub fn get_timer(&self) -> Duration {
         self.system_test_timer
     }
@@ -189,7 +201,7 @@ impl WingAntiIceValveController {
 
 impl SimulationElement for WingAntiIceValveController {
     fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT", self.system_test_done);
+        writer.write("PNEU_WING_ANTI_ICE_BUTTON_ON_LIGHT", self.pushbutton_should_light_on);
     }
     fn read(&mut self, reader: &mut SimulatorReader) {
         self.is_on_ground = reader.read(&Self::IS_ON_GROUND_SIMVAR);
@@ -620,6 +632,10 @@ mod tests {
             self
         }
 
+        fn wing_anti_ice_on_light(&mut self) -> bool {
+            self.read("PNEU_WING_ANTI_ICE_BUTTON_ON_LIGHT")
+        }
+
         fn is_sim_on_ground(&mut self) -> bool {
             self.read("SIM ON GROUND")
         }
@@ -776,19 +792,21 @@ mod tests {
         assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(0));
 
         test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
+        test_bed.run_with_delta(Duration::from_millis(16));
+        assert!(test_bed.wing_anti_ice_on_light() == true);
         test_bed.run_with_delta(Duration::from_secs(1));
         
         assert!(test_bed.left_valve_open_amount()>0.);
-        assert!(test_bed.left_valve_controller_timer() ==  Duration::from_secs(1));
+        assert!(test_bed.left_valve_controller_timer() <  Duration::from_secs(2));
         assert!(test_bed.right_valve_open_amount()>0.);
-        assert!(test_bed.right_valve_controller_timer() ==  Duration::from_secs(1));
+        assert!(test_bed.right_valve_controller_timer() <  Duration::from_secs(2));
 
         test_bed.run_with_delta(Duration::from_secs(30));
         assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(30));
         assert!(test_bed.left_valve_open_amount() == 0.);
         assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(30));
         assert!(test_bed.right_valve_open_amount() == 0.);
-        assert!(test_bed.wing_anti_ice_has_fault());
+        assert!(test_bed.wing_anti_ice_on_light() == false);
 
 
     }
@@ -805,7 +823,8 @@ mod tests {
 
         test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
         test_bed.run_with_delta(Duration::from_secs(31));
-
+        
+        assert!(test_bed.wing_anti_ice_on_light() == false);
         assert!(test_bed.left_valve_open_amount() == 0.);
         assert!(test_bed.right_valve_open_amount() == 0.);
 
@@ -816,7 +835,8 @@ mod tests {
                 .and_stabilize();
         test_bed.set_on_ground(false);
         test_bed.run_with_delta(Duration::from_secs(1));
-
+        
+        assert!(test_bed.wing_anti_ice_on_light() == true);
         assert!(test_bed.left_valve_open_amount() > 0.);
         assert!(test_bed.right_valve_open_amount() > 0.);
         assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
