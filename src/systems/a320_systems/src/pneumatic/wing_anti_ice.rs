@@ -8,6 +8,7 @@ use uom::si::{
     pressure::{pascal, psi},
     ratio::{percent, ratio},
     thermodynamic_temperature::degree_celsius,
+    temperature_interval,
     volume::cubic_meter,
     volume_rate::cubic_meter_per_second,
 };
@@ -39,7 +40,8 @@ pub struct StaticExhaust {
 }
 
 impl StaticExhaust {
-    const TRANSFER_SPEED: f64 = 3.;
+    const MASS_TRANSFER_SPEED: f64 = 3.;
+    const HEAT_TRANSFER_SPEED: f64 = 1.;
     
     //Unlike `DefaultValve`, we need to specify the 
     //initial open amount everytime we initiate a new exhaust
@@ -64,20 +66,28 @@ impl StaticExhaust {
         let equalization_volume = (from.pressure()-context.ambient_pressure()) * from.volume()
             / Pressure::new::<pascal>(142000.);
         self.exhaust_volume(
+            context,
             from,
             self.open_amount()
                 * equalization_volume
-                * (1. - (-Self::TRANSFER_SPEED * context.delta_as_secs_f64()).exp()),
+                * (1. - (-Self::MASS_TRANSFER_SPEED * context.delta_as_secs_f64()).exp()),
         );
     } 
     
     //Exhaust a certain amount of volume
     fn exhaust_volume(  
             &self,
+            context: &UpdateContext,
             from: &mut impl PneumaticContainer,
             volume: Volume,
     ) {
-        from.change_volume(-volume);
+        from.update_pressure_only(-volume);
+        
+        let delta_T: TemperatureInterval = TemperatureInterval::
+            new::<temperature_interval::degree_celsius>(
+                from.temperature().get::<degree_celsius>() - context.ambient_temperature().get::<degree_celsius>()
+            );
+        from.update_temperature(-delta_T*Self::HEAT_TRANSFER_SPEED*context.delta_as_secs_f64());
     }
 }
 
@@ -267,6 +277,10 @@ impl PneumaticContainer for WingAntiIceConsumer {
 
     fn update_temperature(&mut self, temperature: TemperatureInterval) {
         self.pipe.update_temperature(temperature);
+    }
+
+    fn update_pressure_only(&mut self, volume: Volume) { 
+        self.pipe.update_pressure_only(volume);
     }
 
 }
@@ -694,6 +708,24 @@ mod tests {
         PneumaticTestBed::new()
     }
 
+
+    #[test]
+    fn wing_anti_ice_pressure_equilibrium () {
+        let altitude = Length::new::<foot>(10000.);
+        let ambient_pressure = ISA::pressure_at_altitude(altitude);
+        let ambient_temperature = ISA::temperature_at_altitude(altitude);
+        
+        let mut test_bed = test_bed().in_isa_atmosphere(altitude)
+            .idle_eng1()
+            .idle_eng2()
+            .and_stabilize().and_stabilize();
+        println!("ambient pressure {}", ambient_pressure.get::<psi>());
+        println!("left press = {}", test_bed.left_wai_pressure().get::<psi>());
+        println!("------");
+        println!("ambient temp {}", ambient_temperature.get::<degree_celsius>());
+        println!("left temp = {}", test_bed.left_wai_temperature().get::<degree_celsius>());
+        assert!(1>1);
+    }
 
     #[test]
     fn wing_anti_ice_pressurized() {

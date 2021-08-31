@@ -879,6 +879,10 @@ impl PneumaticContainer for EngineBleedAirSystem {
     fn update_temperature(&mut self, temperature: TemperatureInterval) {
         self.precooler_outlet_pipe.update_temperature(temperature);
     }
+
+    fn update_pressure_only(&mut self, volume: Volume) {
+        self.precooler_outlet_pipe.update_pressure_only(volume);
+    }
 }
 
 pub struct A320PneumaticOverheadPanel {

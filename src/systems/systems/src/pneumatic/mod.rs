@@ -35,6 +35,7 @@ pub trait PneumaticContainer {
     fn temperature(&self) -> ThermodynamicTemperature;
     fn change_volume(&mut self, volume: Volume);
     fn update_temperature(&mut self, temperature: TemperatureInterval);
+    fn update_pressure_only(&mut self, volume: Volume);
 }
 
 // Default container
@@ -66,7 +67,12 @@ impl PneumaticContainer for DefaultPipe {
     fn update_temperature(&mut self, temperature: TemperatureInterval) {
         self.temperature += temperature;
     }
+
+    fn update_pressure_only(&mut self, volume: Volume) {
+        self.pressure += self.calculate_pressure_change_for_volume_change(volume);
+    } 
 }
+
 impl DefaultPipe {
     const HEAT_CAPACITY_RATIO: f64 = 1.4;
 
@@ -293,6 +299,11 @@ impl PneumaticContainer for CompressionChamber {
     fn update_temperature(&mut self, temperature: TemperatureInterval) {
         self.pipe.update_temperature(temperature);
     }
+
+    fn update_pressure_only(&mut self, volume: Volume) {
+        self.pipe.update_pressure_only(volume);
+
+    } 
 }
 impl CompressionChamber {
     pub fn new(volume: Volume) -> Self {
@@ -364,6 +375,11 @@ impl PneumaticContainer for DefaultConsumer {
     fn update_temperature(&mut self, temperature: TemperatureInterval) {
         self.pipe.update_temperature(temperature);
     }
+
+    fn update_pressure_only(&mut self, volume: Volume) {
+        self.pipe.update_pressure_only(volume);
+    } 
+
 }
 impl DefaultConsumer {
     pub fn new(volume: Volume) -> Self {
