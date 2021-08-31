@@ -182,6 +182,8 @@ impl WingAntiIceValveController {
             } else if self.is_on_ground == false {
                 self.pushbutton_should_light_on = true;
             }
+        } else {
+            self.pushbutton_should_light_on = false;
         }
         
         //If the plane has took off, we reset the timer
