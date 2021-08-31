@@ -132,8 +132,8 @@ impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
 }
 
 //This is the actual controller. It holds the push button status.
-//In the future, this should also hold the 30 seconds on ground
-//logic.
+//AUG29 - Implemented pressure regulation using PID. Need to tweak
+//AUG30 - Implemented the 30 second on ground test mechanism
 pub struct WingAntiIceValveController {
     wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
     valve_pid: Pid<f64>,
@@ -173,9 +173,12 @@ impl WingAntiIceValveController {
                 }
             }
         }
-
+        //If the plane has took off, we reset the timer
+        //and set test_done to false in order for the 
+        //mechanism to work when landing.
         if self.is_on_ground == false {
             self.system_test_timer = Duration::from_secs(0);
+            self.system_test_done = false;
         }
     }
 
@@ -200,6 +203,8 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
         match self.wing_anti_ice_button_pos {
             WingAntiIcePushButtonMode::Off => Some(WingAntiIceValveSignal::new_closed()),
             WingAntiIcePushButtonMode::On => {
+                //Even if the button is pushed, we need to check if either
+                //the plane is airborne or it is within the 30 second timeframe.
                 if self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false) {
                     Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
                                 self.valve_pid_output.max(0.).min(1.))))
@@ -267,8 +272,10 @@ impl WingAntiIceConsumer {
  * into A320Pneumatic, however I think this is cleaner.
  * The complex includes both WAI parts. Each part contains 
  * a consumer, a valve and an exhaust.
- * A single valve controller controls both valves (CHECK NEEDED)
- *
+ * 
+ * There are two valve controllers, one for each.
+ * Still need to figure out whether this is how it works.
+ * 
  * */
 pub struct WingAntiIceComplex {
     left_wai_exhaust: StaticExhaust,
