@@ -600,7 +600,11 @@ mod tests {
         }
 
         fn wing_anti_ice_push_button(mut self, mode: WingAntiIcePushButtonMode) -> Self {
-            self.write("BUTTON_OVHD_ANTI_ICE_WING_Position", mode);
+            match mode {
+                WingAntiIcePushButtonMode::On => 
+                    self.write("BUTTON_OVHD_ANTI_ICE_WING_Position", true),
+                _ => self.write("BUTTON_OVHD_ANTI_ICE_WING_Position", false),
+            };
 
             self
         }

@@ -134,6 +134,15 @@ fn create_aircraft_variable_reader(
         &vec!["OVHD_PNEU_ENG_2_BLEED_PB_IS_AUTO"],
     );
 
+    reader.add("PNEU_WING_ANTI_ICE_HAS_FAULT","bool",0)?;
+
+    reader.add_with_additional_names(
+        "STRUCTURAL DEICE SWITCH",
+        "Bool",
+        0,
+        &vec!["BUTTON_OVHD_ANTI_ICE_WING_Position"],
+        );
+
     Ok(reader)
 }
 

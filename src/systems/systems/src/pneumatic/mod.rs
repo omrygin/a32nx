@@ -394,11 +394,18 @@ impl WingAntiIcePushButton {
     pub fn mode(&self) -> WingAntiIcePushButtonMode {
         self.mode
     }
+
+    pub fn is_on(&self) -> bool {
+        match self.mode {
+            WingAntiIcePushButtonMode::On => true,
+            _ => false,
+        }
+    }
 }
 
 impl SimulationElement for WingAntiIcePushButton {
     fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write(&self.mode_id,self.mode());
+        writer.write(&self.mode_id,self.is_on());
     }
 
     fn read(&mut self, reader: &mut SimulatorReader) {
