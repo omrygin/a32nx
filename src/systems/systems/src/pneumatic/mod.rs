@@ -88,6 +88,10 @@ impl DefaultPipe {
         self.temperature *= (1. + volume.get::<cubic_meter>() / self.volume.get::<cubic_meter>())
             .powf(Self::HEAT_CAPACITY_RATIO - 1.);
     }
+    fn update_temperautre_for_pressure_change(&mut self, delta_pressure: Pressure) {
+        self.temperature *= ((self.pressure.get::<psi>() + delta_pressure.get::<psi>())/self.pressure.get::<psi>())
+            .powf(1.-1./Self::HEAT_CAPACITY_RATIO);
+    }
 
     fn vol_to_target(&self, target_press: Pressure) -> Volume {
         (target_press - self.pressure()) * self.volume() / self.fluid.bulk_mod()
@@ -258,7 +262,7 @@ impl EngineCompressionChamberController {
         // Static pressure + compressionfactor * dynamic pressure
         // Dynamic pressure from here: https://en.wikipedia.org/wiki/Mach_number
         let total_pressure = (1.
-            + (self.compression_factor * Self::GAMMA * corrected_mach.powi(2)) / 2.)
+            + (self.compression_factor * Self::HEAT_CAPACITY_RATIO * corrected_mach.powi(2)) / 2.)
             * context.ambient_pressure();
 
         self.target_pressure = total_pressure;
@@ -373,6 +377,37 @@ impl DefaultConsumer {
     }
 }
 
+// WING ANTI ICE BLOCK
+pub struct WingAntiIcePushButton {
+    mode_id: String,
+    mode: WingAntiIcePushButtonMode,
+}
+
+impl WingAntiIcePushButton {
+    pub fn new_off() -> Self {
+        Self {
+            mode_id: String::from("BUTTON_OVHD_ANTI_ICE_WING_Position"),
+            mode: WingAntiIcePushButtonMode::Off,
+        }
+    }
+
+    pub fn mode(&self) -> WingAntiIcePushButtonMode {
+        self.mode
+    }
+}
+
+impl SimulationElement for WingAntiIcePushButton {
+    fn write(&self, writer: &mut SimulatorWriter) {
+        writer.write(&self.mode_id,self.mode());
+    }
+
+    fn read(&mut self, reader: &mut SimulatorReader) {
+        self.mode = reader.read(&self.mode_id)
+    }
+}
+
+// END WING ANTI ICE BLOCK
+
 pub struct CrossBleedValveSelectorKnob {
     mode_id: String,
     mode: CrossBleedValveSelectorMode,
@@ -398,6 +433,28 @@ impl SimulationElement for CrossBleedValveSelectorKnob {
         self.mode = reader.read(&self.mode_id)
     }
 }
+
+//WING ANTI ICE BLOCK
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WingAntiIcePushButtonMode {
+    Off = 0,
+    On = 1
+}
+
+read_write_enum!(WingAntiIcePushButtonMode);
+
+impl From<f64> for WingAntiIcePushButtonMode {
+    fn from(value: f64) -> Self {
+        match value as u8 {
+            0 => WingAntiIcePushButtonMode::Off,
+            _ => WingAntiIcePushButtonMode::On,
+        }
+    }
+}
+
+
+
+//END WING ANTI ICE BLOCK
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CrossBleedValveSelectorMode {
@@ -986,5 +1043,34 @@ mod tests {
 
             assert_eq!(read_mode, CrossBleedValveSelectorMode::Open);
         }
+    }
+    mod wing_anti_ice_push_button {
+        use super::*;
+        
+        #[test]
+        fn button_modes_are_represented_as_simvar_integers() {
+            let mut test_bed = SimulationTestBed::from(WingAntiIcePushButton::new_off());
+
+            test_bed.write("BUTTON_OVHD_ANTI_ICE_WING_Position",0);
+            test_bed.run();
+
+            let read_mode: WingAntiIcePushButtonMode =
+                test_bed.read("BUTTON_OVHD_ANTI_ICE_WING_Position");
+            assert_eq!(read_mode,WingAntiIcePushButtonMode::Off);
+            
+            test_bed.write("BUTTON_OVHD_ANTI_ICE_WING_Position",1);
+            test_bed.run();
+
+            let read_mode: WingAntiIcePushButtonMode =
+                test_bed.read("BUTTON_OVHD_ANTI_ICE_WING_Position");
+
+            assert_eq!(read_mode,WingAntiIcePushButtonMode::On);
+
+
+
+        }
+
+
+
     }
 }

@@ -185,6 +185,9 @@ impl WingAntiIceValveController {
 }
 
 impl SimulationElement for WingAntiIceValveController {
+    fn write(&self, writer: &mut SimulatorWriter) {
+        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT", self.system_test_done);
+    }
     fn read(&mut self, reader: &mut SimulatorReader) {
         self.is_on_ground = reader.read(&Self::IS_ON_GROUND_SIMVAR);
     }
@@ -606,6 +609,10 @@ mod tests {
             self.read("SIM ON GROUND")
         }
 
+        fn wing_anti_ice_has_fault(&mut self) -> bool {
+            self.read("PNEU_WING_ANTI_ICE_HAS_FAULT")
+        }
+
         //Utility functions to get info from the test bed
         fn left_wai_pressure(&self) -> Pressure {
             self.query(|a| a.pneumatic.wing_anti_ice.left_wai_consumer_pressure())
@@ -771,7 +778,7 @@ mod tests {
         assert!(test_bed.left_valve_open_amount() == 0.);
         assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(30));
         assert!(test_bed.right_valve_open_amount() == 0.);
-
+        assert!(test_bed.wing_anti_ice_has_fault());
 
 
     }
