@@ -40,8 +40,7 @@ pub struct StaticExhaust {
 }
 
 impl StaticExhaust {
-    const MASS_TRANSFER_SPEED: f64 = 3.;
-    const HEAT_TRANSFER_SPEED: f64 = 1.;
+    const MASS_TRANSFER_SPEED: f64 = 1.;
     
     //Unlike `DefaultValve`, we need to specify the 
     //initial open amount everytime we initiate a new exhaust
@@ -81,13 +80,7 @@ impl StaticExhaust {
             from: &mut impl PneumaticContainer,
             volume: Volume,
     ) {
-        from.update_pressure_only(-volume);
-        
-        let delta_T: TemperatureInterval = TemperatureInterval::
-            new::<temperature_interval::degree_celsius>(
-                from.temperature().get::<degree_celsius>() - context.ambient_temperature().get::<degree_celsius>()
-            );
-        from.update_temperature(-delta_T*Self::HEAT_TRANSFER_SPEED*context.delta_as_secs_f64());
+        from.change_volume(-volume);    
     }
 }
 
@@ -286,6 +279,8 @@ impl PneumaticContainer for WingAntiIceConsumer {
 }
 
 impl WingAntiIceConsumer {
+
+    const CONDUCTION_RATE: f64 = 0.1;
     pub fn new(volume: Volume) -> Self {
         Self {
             pipe: DefaultPipe::new(volume,
@@ -294,6 +289,16 @@ impl WingAntiIceConsumer {
                 ThermodynamicTemperature::new::<degree_celsius>(15.),
                 ),
         }
+    }
+    //Radiate heat to the ambient atmosphere
+    //according to Newton's law of cooling
+    //dT/dt = -(T-T_atmo) / tau
+    pub fn radiate_heat_to_ambient(&mut self,context: &UpdateContext) {
+        let delta_t: TemperatureInterval = TemperatureInterval::new::<temperature_interval::degree_celsius>(
+            self.temperature().get::<degree_celsius>() - context.ambient_temperature().get::<degree_celsius>()
+            );
+
+        self.update_temperature(-delta_t*context.delta_as_secs_f64()*Self::CONDUCTION_RATE);
     }
 
 }
@@ -310,6 +315,8 @@ impl WingAntiIceConsumer {
  * 
  * */
 pub struct WingAntiIceComplex {
+    
+
     left_wai_exhaust: StaticExhaust,
     left_wai_valve: DefaultValve,
     left_wai_consumer: WingAntiIceConsumer,
@@ -325,6 +332,7 @@ pub struct WingAntiIceComplex {
 }
 
 impl WingAntiIceComplex {
+
     pub fn new() -> Self {
         Self {
             left_wai_exhaust: StaticExhaust::new(Ratio::new::<percent>(10.)),
@@ -408,16 +416,21 @@ impl WingAntiIceComplex {
             &mut self.right_wai_consumer, 
             );
         
+        self.left_wai_consumer.radiate_heat_to_ambient(context);
+        self.right_wai_consumer.radiate_heat_to_ambient(context);
+
         //This only changes the volume if open_amount is not zero.
-        self.left_wai_valve.update_move_fluid(
+        self.left_wai_valve.update_move_fluid_with_temperature(
             context, 
             &mut engine_systems[0].precooler_outlet_pipe, 
             &mut self.left_wai_consumer);
-
-        self.right_wai_valve.update_move_fluid(
+        
+        self.right_wai_valve.update_move_fluid_with_temperature(
             context, 
             &mut engine_systems[1].precooler_outlet_pipe, 
             &mut self.right_wai_consumer);
+
+
     }
 
 }
@@ -591,6 +604,15 @@ mod tests {
             }
 
             self
+        }
+
+        fn and_stabilize_steps(mut self, n: usize) -> Self {
+            for _ in 1..n {
+                for _ in 1..1000 {
+                    self.run_with_delta(Duration::from_millis(16));
+                }
+            }
+           self 
         }
 
         fn in_isa_atmosphere(mut self, altitude: Length) -> Self {
@@ -777,32 +799,34 @@ mod tests {
     
     #[test]
     fn wing_anti_ice_temperature() {
-        let altitude = Length::new::<foot>(10000.);
+        let altitude = Length::new::<foot>(0.);
         let ambient_pressure = ISA::pressure_at_altitude(altitude);
         let ambient_temp = ISA::temperature_at_altitude(altitude);
 
         let mut test_bed = test_bed()
             .in_isa_atmosphere(altitude)
-            .power_eng1()
-            .power_eng2().and_stabilize();
-        test_bed.run_with_delta(Duration::from_secs(100));
+            .idle_eng1()
+            .idle_eng2().and_stabilize_steps(5);
         println!("left temp = {}, right temp = {}", 
                  test_bed.left_wai_temperature().get::<degree_celsius>(),
                  test_bed.right_wai_temperature().get::<degree_celsius>(),);
         println!("ambient = {}",ambient_temp.get::<degree_celsius>());
-
-        test_bed = test_bed
-            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
-            .and_stabilize();
-
-        test_bed.run_with_delta(Duration::from_secs(50));
+        println!("precooler left = {}", test_bed.precooler_temperature(1).get::<degree_celsius>());
         println!("---------------------------");
+
+        test_bed = test_bed.power_eng1().power_eng2().in_isa_atmosphere(
+            Length::new::<foot>(10000.))
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize_steps(40);
+
         println!("left temp = {}, right temp = {}", 
                  test_bed.left_wai_temperature().get::<degree_celsius>(),
                  test_bed.right_wai_temperature().get::<degree_celsius>(),);
         println!("ambient = {}",ambient_temp.get::<degree_celsius>());
-
-        assert!(1==1);
+        println!("precooler left = {}", test_bed.precooler_temperature(1).get::<degree_celsius>());
+        println!("{}", test_bed.left_valve_open_amount());
+        println!("---------------------------");
+        assert!(1>1);
     }
 
     #[test]

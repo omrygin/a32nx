@@ -160,6 +160,40 @@ impl DefaultValve {
         );
     }
 
+    //This method is the same as update_move_fluid
+    //but also updates the temperature of `to`
+    //according to a weighted mean
+    pub fn update_move_fluid_with_temperature(
+        &self,
+        context: &UpdateContext,
+        from: &mut impl PneumaticContainer,
+        to: &mut impl PneumaticContainer,
+    ) {
+        let equalization_volume = (from.pressure() - to.pressure()) * from.volume() * to.volume()
+            / Pressure::new::<pascal>(142000.)
+            / (from.volume() + to.volume());
+
+        let delta_v = 
+            self.open_amount()
+                * equalization_volume
+                * (1. - (-Self::TRANSFER_SPEED * context.delta_as_secs_f64()).exp());
+
+        self.move_volume(
+            from,
+            to,
+            delta_v,
+        );
+
+        let avg_temp: ThermodynamicTemperature= ThermodynamicTemperature::new::<degree_celsius>
+            ((delta_v.get::<cubic_meter>() * from.temperature().get::<degree_celsius>() 
+              + to.volume().get::<cubic_meter>()*to.temperature().get::<degree_celsius>())
+            / (delta_v.get::<cubic_meter>() + to.volume().get::<cubic_meter>()));
+        let delta_t: TemperatureInterval = TemperatureInterval::new::<temperature_interval::degree_celsius>
+            (avg_temp.get::<degree_celsius>() - to.temperature().get::<degree_celsius>());
+
+        to.update_temperature(delta_t);
+    }
+
     fn move_volume(
         &self,
         from: &mut impl PneumaticContainer,
