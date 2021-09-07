@@ -151,8 +151,9 @@ pub struct WingAntiIceValveController {
     is_on_ground: bool, //Needed for the 30 seconds test logic
     system_test_timer: Duration, //Timer to count up to 30 seconds
     system_test_done: bool, //Timer reached 30 seconds while on the ground
-    pushbutton_should_light_on: bool, //If button is pushed and the test is finished
+    controller_signals_on: bool, //If button is pushed and the test is finished
                                         //the ON light should turn off.
+    supplier_pressurized: bool,
 }
 
 impl WingAntiIceValveController {
@@ -166,33 +167,44 @@ impl WingAntiIceValveController {
             is_on_ground: true,
             system_test_timer: Duration::from_secs(0),
             system_test_done: false,
-            pushbutton_should_light_on: false,
+            controller_signals_on: false,
+            supplier_pressurized: false,
        }
     
+    }
+
+    pub fn controller_signals_on(&self) -> bool {
+        self.controller_signals_on
     }
     
     pub fn update (
         &mut self,
         context: &UpdateContext,
         wing_anti_ice_button_pos: WingAntiIcePushButtonMode,
+        supplier_pressurized: bool,
     ) {
         self.wing_anti_ice_button_pos = wing_anti_ice_button_pos;
+        self.supplier_pressurized = supplier_pressurized;
+
         if self.wing_anti_ice_button_pos == WingAntiIcePushButtonMode::On {
             if self.is_on_ground && self.system_test_done == false {
-                self.system_test_timer += context.delta();
+                if self.supplier_pressurized {
+                    self.system_test_timer += context.delta();
+                }
                 self.system_test_timer = self.system_test_timer.min(Self::WAI_TEST_TIME);
                 if self.system_test_timer == Self::WAI_TEST_TIME {
                     self.system_test_done = true;
-                    self.pushbutton_should_light_on = false;
+                    self.controller_signals_on = false;
                 } else {
-                    self.pushbutton_should_light_on = true;
+                    self.controller_signals_on = true;
                 }
             } else if self.is_on_ground == false {
-                self.pushbutton_should_light_on = true;
+                self.controller_signals_on = true;
             }
         } else {
-            self.pushbutton_should_light_on = false;
+            self.controller_signals_on = false;
         }
+
         
         //If the plane has took off, we reset the timer
         //and set test_done to false in order for the 
@@ -210,9 +222,6 @@ impl WingAntiIceValveController {
 }
 
 impl SimulationElement for WingAntiIceValveController {
-    fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write("PNEU_WING_ANTI_ICE_SYSTEM_ON", self.pushbutton_should_light_on);
-    }
     fn read(&mut self, reader: &mut SimulatorReader) {
         self.is_on_ground = reader.read(&Self::IS_ON_GROUND_SIMVAR);
     }
@@ -227,7 +236,8 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
             WingAntiIcePushButtonMode::On => {
                 //Even if the button is pushed, we need to check if either
                 //the plane is airborne or it is within the 30 second timeframe.
-                if self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false) {
+                if self.supplier_pressurized && (
+                    self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false)) {
                     Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
                                 self.valve_pid_output.max(0.).min(1.))))
                 } else {
@@ -324,6 +334,8 @@ pub struct WingAntiIceComplex {
     wai_valve: [DefaultValve; 2],
     wai_consumer: [WingAntiIceConsumer; 2],
     valve_controller: [WingAntiIceValveController; 2],
+    wai_system_has_fault: bool,
+    wai_system_on: bool,
 }
 
 impl WingAntiIceComplex {
@@ -339,11 +351,15 @@ impl WingAntiIceComplex {
                         WingAntiIceConsumer::new(Volume::new::<cubic_meter>(1.))],
             valve_controller: [WingAntiIceValveController::new(),
                                 WingAntiIceValveController::new()],
+
+            wai_system_has_fault: false,
+            wai_system_on: false,
          }
     }
 
-    fn update_valve_controller(&mut self, context: &UpdateContext, wai_mode: WingAntiIcePushButtonMode, number: usize) {
-        self.valve_controller[number].update(context, wai_mode);
+    fn update_valve_controller(&mut self, context: &UpdateContext, wai_mode: WingAntiIcePushButtonMode, number: usize,
+                                supplier_pressurized: bool) {
+        self.valve_controller[number].update(context, wai_mode,supplier_pressurized);
     }
 
     pub fn is_wai_valve_open(&self, number: usize) -> bool {
@@ -365,6 +381,9 @@ impl WingAntiIceComplex {
         engine_systems: &mut [EngineBleedAirSystem; 2],
         wai_mode: WingAntiIcePushButtonMode,
     ) {
+        let mut has_fault: bool = false;
+        let mut num_of_on: usize = 0;
+
         for n in 0..Self::NUM_OF_WAI {
             self.valve_controller[n].valve_pid_output = 
                 self.valve_controller[n].valve_pid.next_control_output(
@@ -374,9 +393,17 @@ impl WingAntiIceComplex {
             
             //First, we see if the valve's open amount changes this update,
             //as a result of a change in the ovhd panel push button.
-            self.update_valve_controller(context,wai_mode,n);
+            self.update_valve_controller(context,wai_mode,n,
+                engine_systems[n].precooler_outlet_pressure() > 1.05*context.ambient_pressure());
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
             
+            if self.valve_controller[n].controller_signals_on() {
+                num_of_on +=1;
+                if self.is_wai_valve_open(n)  == false {
+                    has_fault = true;
+                }
+            }
+
             //An exhaust tick always happens, no matter what 
             //the valve's state is
             //
@@ -393,7 +420,17 @@ impl WingAntiIceComplex {
                 &mut engine_systems[n].precooler_outlet_pipe, 
                 &mut self.wai_consumer[n]);
 
-        } 
+        }
+
+        self.wai_system_has_fault = has_fault;
+        
+        if num_of_on < 2 {
+            self.wai_system_on = false;
+        } else {
+            if !has_fault {
+                self.wai_system_on = true;
+            }
+        }
 
     }
 
@@ -405,14 +442,14 @@ impl SimulationElement for WingAntiIceComplex {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
     where Self: Sized, {
         for n in 0..Self::NUM_OF_WAI {
-            self.valve_controller[0].accept(visitor);
-            self.valve_controller[1].accept(visitor);
+            self.valve_controller[n].accept(visitor);
         }
         visitor.visit(self);
     }
 
     fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT",0);
+        writer.write("PNEU_WING_ANTI_ICE_SYSTEM_ON", self.wai_system_on);
+        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT",self.wai_system_has_fault);
         writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[0].pressure());
         writer.write("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[1].pressure());
         writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[0].temperature());
@@ -750,8 +787,9 @@ mod tests {
         let mut test_bed = test_bed()
             .stop_eng1()
             .stop_eng2()
-            .in_isa_atmosphere(altitude)
-            .and_stabilize_steps(6);
+            .in_isa_atmosphere(altitude);
+        test_bed.set_on_ground(true);
+        test_bed = test_bed.and_stabilize_steps(6);
 
         println!("left press = {}", test_bed.left_wai_pressure().get::<psi>());
         println!("right press = {}", test_bed.right_wai_pressure().get::<psi>());
@@ -770,12 +808,74 @@ mod tests {
         assert!(test_bed.right_valve_open() == false);
         assert!(test_bed.wing_anti_ice_system_on() == false);
         assert!(test_bed.wing_anti_ice_has_fault() == false);
+
     }
 
     #[test]
+    fn wing_anti_ice_has_fault_when_precooler_not_pressurized() {
+        let altitude = Length::new::<foot>(500.);
+
+        let mut test_bed = test_bed()
+            .stop_eng1()
+            .stop_eng2()
+            .in_isa_atmosphere(altitude);
+        test_bed.set_on_ground(true);
+        test_bed = test_bed.and_stabilize();
+
+        test_bed = test_bed
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize();
+        assert!(test_bed.wing_anti_ice_has_fault());
+    }
+
+    #[test]
+    fn wing_anti_ice_no_fault_after_starting_engine() {
+        let altitude = Length::new::<foot>(500.);
+        let wai_pressure: Pressure = Pressure::new::<psi>(22.);
+        let pressure_epsilon: Pressure = Pressure::new::<psi>(0.1);
+
+        let mut test_bed = test_bed()
+            .stop_eng1()
+            .stop_eng2()
+            .in_isa_atmosphere(altitude);
+        test_bed.set_on_ground(true);
+        test_bed = test_bed.and_stabilize();
+
+        test_bed = test_bed
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize();
+        assert!(test_bed.wing_anti_ice_has_fault());
+
+        test_bed = test_bed
+                .idle_eng1()
+                .idle_eng2()
+                .and_stabilize();
+        assert!(test_bed.wing_anti_ice_has_fault() == false);
+        assert!(test_bed.wing_anti_ice_system_on());
+    }
+
+    #[test]
+    fn wing_anti_ice_timer_doesnt_start_if_precooler_not_pressurized() {
+        let altitude = Length::new::<foot>(500.);
+
+        let mut test_bed = test_bed()
+            .stop_eng1()
+            .stop_eng2()
+            .in_isa_atmosphere(altitude);
+        test_bed.set_on_ground(true);
+        test_bed = test_bed.and_stabilize();
+        
+        test_bed = test_bed
+            .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
+            .and_stabilize();
+        assert!(test_bed.wing_anti_ice_has_fault());
+        assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
+        assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(0));
+
+    }
+    #[test]
     fn wing_anti_ice_pressure_regulated() {
         let altitude = Length::new::<foot>(0.);
-        let ambient_pressure = ISA::pressure_at_altitude(altitude);
         let wai_pressure: Pressure = Pressure::new::<psi>(22.);
         let pressure_epsilon: Pressure = Pressure::new::<psi>(0.1);
 
@@ -898,6 +998,5 @@ mod tests {
 
 
     }
-
 
 }

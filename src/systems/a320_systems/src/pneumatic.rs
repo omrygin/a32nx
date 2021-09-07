@@ -1629,13 +1629,6 @@ mod tests {
         assert!(test_bed.contains_key("OVHD_PNEU_ENG_2_BLEED_PB_IS_AUTO"));
 
         assert!(test_bed.contains_key("PNEU_XBLEED_VALVE_OPEN"));
-
-        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
-        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
-        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_VALVE_OPEN"));
-        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_VALVE_OPEN"));
-        assert!(test_bed.contains_key("LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
-        assert!(test_bed.contains_key("RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
     }
 
     #[test]
