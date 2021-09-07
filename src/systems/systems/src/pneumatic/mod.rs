@@ -66,7 +66,7 @@ impl PneumaticContainer for DefaultPipe {
 
     fn update_temperature(&mut self, temperature_change: TemperatureInterval) {
         self.temperature += temperature_change;
-        self.update_pressure_for_temperature_change(temperature_change);
+//        self.update_pressure_for_temperature_change(temperature_change);
     }
 
     fn update_pressure_only(&mut self, volume: Volume) {
@@ -109,7 +109,7 @@ impl DefaultPipe {
         self.pressure *= (self.temperature.get::<degree_celsius>()
             / (self.temperature.get::<degree_celsius>()
                 + temperature_change.get::<temperature_interval::degree_celsius>()))
-        .powf(Self::HEAT_CAPACITY_RATIO / (Self::HEAT_CAPACITY_RATIO - 1.));
+        .powf(-Self::HEAT_CAPACITY_RATIO / (Self::HEAT_CAPACITY_RATIO - 1.));
     }
 }
 

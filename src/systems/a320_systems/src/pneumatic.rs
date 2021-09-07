@@ -311,8 +311,8 @@ impl SimulationElement for A320Pneumatic {
             "APU_BLEED_AIR_VALVE_OPEN",
             self.apu_bleed_air_valve.is_open(),
         );
-        writer.write("LEFT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_left_wai_valve_open());
-        writer.write("RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_right_wai_valve_open());
+        writer.write("LEFT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_wai_valve_open(0));
+        writer.write("RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_wai_valve_open(1));
     }
 }
 
@@ -1255,13 +1255,6 @@ mod tests {
             self.query(|a| a.pneumatic.apu_bleed_air_valve.is_open())
         }
 
-        fn left_wai_valve_is_open(&self) -> bool {
-            self.query(|a| a.pneumatic.wing_anti_ice.is_left_wai_valve_open())
-        }
-
-        fn right_wai_valve_is_open(&self) -> bool {
-            self.query(|a| a.pneumatic.wing_anti_ice.is_right_wai_valve_open())
-        }
 
         fn set_engine_bleed_push_button_off(mut self, number: usize) -> Self {
             self.write(&format!("OVHD_PNEU_ENG_{}_BLEED_PB_IS_AUTO", number), false);

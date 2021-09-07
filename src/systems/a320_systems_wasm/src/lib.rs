@@ -135,7 +135,7 @@ fn create_aircraft_variable_reader(
     );
 
     reader.add("PNEU_WING_ANTI_ICE_HAS_FAULT","bool",0)?;
-    reader.add("PNEU_WING_ANTI_ICE_BUTTON_ON_LIGHT", "bool", 0)?;
+    reader.add("PNEU_WING_ANTI_ICE_SYSTEM_ON", "bool", 0)?;
     reader.add_with_additional_names(
         "STRUCTURAL DEICE SWITCH",
         "Bool",
