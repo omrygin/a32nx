@@ -311,8 +311,6 @@ impl SimulationElement for A320Pneumatic {
             "APU_BLEED_AIR_VALVE_OPEN",
             self.apu_bleed_air_valve.is_open(),
         );
-        writer.write("LEFT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_wai_valve_open(0));
-        writer.write("RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.wing_anti_ice.is_wai_valve_open(1));
     }
 }
 

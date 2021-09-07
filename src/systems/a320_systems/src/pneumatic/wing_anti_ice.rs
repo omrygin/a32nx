@@ -412,10 +412,14 @@ impl SimulationElement for WingAntiIceComplex {
     }
 
     fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write("LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[0].pressure());
-        writer.write("RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[1].pressure());
-        writer.write("LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[0].temperature());
-        writer.write("RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[1].temperature());
+        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT",0);
+        writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[0].pressure());
+        writer.write("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[1].pressure());
+        writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[0].temperature());
+        writer.write("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[1].temperature());
+        writer.write("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN",self.is_wai_valve_open(0));
+        writer.write("PNEU_RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.is_wai_valve_open(1));
+
     }
 }
 //End WAI Complex block
@@ -427,12 +431,6 @@ mod tests {
 
     #[test]
     fn dummy_test() {
-        let mut test_bed = test_bed()
-            .idle_eng1()
-            .idle_eng2()
-            .and_stabilize();
-        test_bed.wing_anti_ice_set_icing();
-        println!("{}", test_bed.wing_anti_ice_get_icing());
         assert!(1 > 1);
     }
     
@@ -657,15 +655,7 @@ mod tests {
             self
         }
 
-        fn wing_anti_ice_get_icing(&mut self) -> f64 {
-            self.read("STRUCTURAL ICE PCT")
-        }
-
-        fn wing_anti_ice_set_icing(&mut self) {
-            self.write("STRUCTURAL ICE PCT", 50.);
-        }
-
-        fn wing_anti_ice_on_light(&mut self) -> bool {
+        fn wing_anti_ice_system_on(&mut self) -> bool {
             self.read("PNEU_WING_ANTI_ICE_SYSTEM_ON")
         }
 
@@ -735,6 +725,21 @@ mod tests {
 
 
     #[test]
+    fn wing_anti_ice_simvars() {
+        let test_bed = test_bed();
+
+        assert!(test_bed.contains_key("PNEU_WING_ANTI_ICE_SYSTEM_ON"));
+        assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
+        assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
+        assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
+        assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
+        assert!(test_bed.contains_key("PNEU_WING_ANTI_ICE_HAS_FAULT"));
+        assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN"));
+        assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_VALVE_OPEN"));
+        assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN"));
+        assert!(test_bed.contains_key("BUTTON_OVHD_ANTI_ICE_WING_Position"));
+    }
+    #[test]
     fn wing_anti_ice_cold_and_dark() {
         let altitude = Length::new::<foot>(500.);
         let ambient_pressure = ISA::pressure_at_altitude(altitude);
@@ -764,7 +769,7 @@ mod tests {
                      - ambient_temperature.get::<degree_celsius>()).abs() < temperature_epsilon.get::<degree_celsius>());
         assert!(test_bed.left_valve_open() == false);
         assert!(test_bed.right_valve_open() == false);
-        assert!(test_bed.wing_anti_ice_on_light() == false);
+        assert!(test_bed.wing_anti_ice_system_on() == false);
         assert!(test_bed.wing_anti_ice_has_fault() == false);
     }
 
@@ -841,7 +846,7 @@ mod tests {
 
         test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
         test_bed.run_with_delta(Duration::from_millis(16));
-        assert!(test_bed.wing_anti_ice_on_light() == true);
+        assert!(test_bed.wing_anti_ice_system_on() == true);
         test_bed.run_with_delta(Duration::from_secs(1));
         
         assert!(test_bed.left_valve_open_amount()>0.);
@@ -854,7 +859,7 @@ mod tests {
         assert!(test_bed.left_valve_open_amount() == 0.);
         assert!(test_bed.right_valve_controller_timer() == Duration::from_secs(30));
         assert!(test_bed.right_valve_open_amount() == 0.);
-        assert!(test_bed.wing_anti_ice_on_light() == false);
+        assert!(test_bed.wing_anti_ice_system_on() == false);
 
 
     }
@@ -872,7 +877,7 @@ mod tests {
         test_bed = test_bed.wing_anti_ice_push_button(WingAntiIcePushButtonMode::On);
         test_bed.run_with_delta(Duration::from_secs(31));
         
-        assert!(test_bed.wing_anti_ice_on_light() == false);
+        assert!(test_bed.wing_anti_ice_system_on() == false);
         assert!(test_bed.left_valve_open_amount() == 0.);
         assert!(test_bed.right_valve_open_amount() == 0.);
 
@@ -884,7 +889,7 @@ mod tests {
         test_bed.set_on_ground(false);
         test_bed.run_with_delta(Duration::from_secs(1));
         
-        assert!(test_bed.wing_anti_ice_on_light() == true);
+        assert!(test_bed.wing_anti_ice_system_on() == true);
         assert!(test_bed.left_valve_open_amount() > 0.);
         assert!(test_bed.right_valve_open_amount() > 0.);
         assert!(test_bed.left_valve_controller_timer() == Duration::from_secs(0));
