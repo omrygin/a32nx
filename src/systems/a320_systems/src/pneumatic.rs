@@ -1183,12 +1183,6 @@ mod tests {
             self
         }
 
-        fn wing_anti_ice_push_button(mut self, mode: WingAntiIcePushButtonMode) -> Self {
-            self.write("BUTTON_OVHD_ANTI_ICE_WING_Position",mode);
-
-            self
-        }
-
         fn for_both_engine_systems<T: Fn(&EngineBleedAirSystem) -> ()>(&self, func: T) {
             self.query(|a| a.pneumatic.engine_systems.iter().for_each(|sys| func(sys)));
         }

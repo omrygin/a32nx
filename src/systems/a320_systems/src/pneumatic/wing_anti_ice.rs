@@ -161,7 +161,7 @@ impl WingAntiIceValveController {
     pub fn new() -> Self {
         Self {
             wing_anti_ice_button_pos: WingAntiIcePushButtonMode::Off,
-            valve_pid: Pid::new(0.,0.05,0.,1.,1.,1.,1.,22.),
+            valve_pid: Pid::new(0.,0.2,0.,1.,1.,1.,1.,22.),
             valve_pid_output: 0.,
             is_on_ground: true,
             system_test_timer: Duration::from_secs(0),
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn dummy_test() {
-        assert!(1 > 1);
+        assert!(1 == 1);
     }
     
     use super::*;
@@ -729,14 +729,13 @@ mod tests {
         let test_bed = test_bed();
 
         assert!(test_bed.contains_key("PNEU_WING_ANTI_ICE_SYSTEM_ON"));
+        assert!(test_bed.contains_key("PNEU_WING_ANTI_ICE_HAS_FAULT"));
         assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
         assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE"));
         assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
         assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE"));
-        assert!(test_bed.contains_key("PNEU_WING_ANTI_ICE_HAS_FAULT"));
         assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN"));
         assert!(test_bed.contains_key("PNEU_RIGHT_WING_ANTI_ICE_VALVE_OPEN"));
-        assert!(test_bed.contains_key("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN"));
         assert!(test_bed.contains_key("BUTTON_OVHD_ANTI_ICE_WING_Position"));
     }
     #[test]
@@ -778,7 +777,7 @@ mod tests {
         let altitude = Length::new::<foot>(0.);
         let ambient_pressure = ISA::pressure_at_altitude(altitude);
         let wai_pressure: Pressure = Pressure::new::<psi>(22.);
-        let pressure_epsilon: Pressure = Pressure::new::<psi>(0.01);
+        let pressure_epsilon: Pressure = Pressure::new::<psi>(0.1);
 
         let mut test_bed = test_bed()
             .in_isa_atmosphere(altitude)
@@ -795,41 +794,6 @@ mod tests {
         assert!((test_bed.right_wai_pressure() - wai_pressure).abs() < pressure_epsilon);
 
     }
-    
-    // #[test]
-    // fn wing_anti_ice_temperature() {
-    //     let altitude = Length::new::<foot>(0.);
-    //     let ambient_pressure = ISA::pressure_at_altitude(altitude);
-    //     let ambient_temp = ISA::temperature_at_altitude(altitude);
-
-    //     let mut test_bed = test_bed()
-    //         .in_isa_atmosphere(altitude)
-    //         .idle_eng1()
-    //         .idle_eng2();
-    //     test_bed.run();
-    //     test_bed.run();
-    //     println!("left temp = {}, right temp = {}", 
-    //              test_bed.left_wai_temperature().get::<degree_celsius>(),
-    //              test_bed.right_wai_temperature().get::<degree_celsius>(),);
-    //     println!("ambient = {}",ambient_temp.get::<degree_celsius>());
-    //     println!("precooler left = {}", test_bed.precooler_temperature(1).get::<degree_celsius>());
-    //     println!("---------------------------");
-        
-    //     let altitude2 = Length::new::<foot>(20000.);
-    //     test_bed = test_bed.power_eng1().power_eng2().in_isa_atmosphere(altitude2)
-    //         .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
-    //         .and_stabilize_steps(25);
-
-    //     println!("left temp = {}, right temp = {}", 
-    //              test_bed.left_wai_temperature().get::<degree_celsius>(),
-    //              test_bed.right_wai_temperature().get::<degree_celsius>(),);
-    //     println!("ambient = {}",ISA::temperature_at_altitude(altitude2).get::<degree_celsius>());
-    //     println!("precooler left = {}", test_bed.precooler_temperature(1).get::<degree_celsius>());
-    //     println!("left press = {}", test_bed.left_wai_pressure().get::<psi>());
-    //     println!("{}", test_bed.left_valve_open_amount());
-    //     println!("---------------------------");
-    //     assert!(1>1);
-    // }
 
 
     #[test]
@@ -906,7 +870,14 @@ mod tests {
             .in_isa_atmosphere(altitude)
             .wing_anti_ice_push_button(WingAntiIcePushButtonMode::On)
             .and_stabilize();
+        
+        test_bed.set_on_ground(true);
+        test_bed.run_with_delta(Duration::from_secs(30));
+        assert!(test_bed.left_valve_open() == false);
+        assert!(test_bed.right_valve_open() == false);
+
         test_bed.set_on_ground(false);
+        test_bed.run_with_delta(Duration::from_millis(16));
 
         assert!(test_bed.left_valve_open_amount() > 0.);
         assert!(test_bed.right_valve_open_amount() > 0.);
