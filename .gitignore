@@ -43,6 +43,9 @@ node_modules
 /target
 /src/instruments/src/EFB/web/
 /src/systems/target/
+/src/systems/systems/target/
+/src/systems/a320_systems/target/
+/src/systems/a320_systems_wasm/target/
 /src/systems/a320_hydraulic_simulation_graphs/*.png
 !igniter.config.mjs
 .igniter

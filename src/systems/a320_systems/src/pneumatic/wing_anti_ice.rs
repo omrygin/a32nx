@@ -158,7 +158,6 @@ pub struct WingAntiIceValveController {
 
 impl WingAntiIceValveController {
     const WAI_TEST_TIME: Duration = Duration::from_secs(30);
-    const IS_ON_GROUND_SIMVAR: &'static str = "SIM ON GROUND";
     pub fn new() -> Self {
         Self {
             wing_anti_ice_button_pos: WingAntiIcePushButtonMode::Off,
@@ -223,7 +222,7 @@ impl WingAntiIceValveController {
 
 impl SimulationElement for WingAntiIceValveController {
     fn read(&mut self, reader: &mut SimulatorReader) {
-        self.is_on_ground = reader.read(&Self::IS_ON_GROUND_SIMVAR);
+        self.is_on_ground = reader.read(&"SIM ON GROUND");
     }
 }
 //This is the part that interacts with the valve, via DefaultValve.update_open_amount.
@@ -236,6 +235,8 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
             WingAntiIcePushButtonMode::On => {
                 //Even if the button is pushed, we need to check if either
                 //the plane is airborne or it is within the 30 second timeframe.
+                //Also, we need to check if the supplier is pressurized
+                // since the valve is pneumatically operated.
                 if self.supplier_pressurized && (
                     self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false)) {
                     Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
@@ -381,8 +382,8 @@ impl WingAntiIceComplex {
         engine_systems: &mut [EngineBleedAirSystem; 2],
         wai_mode: WingAntiIcePushButtonMode,
     ) {
-        let mut has_fault: bool = false;
-        let mut num_of_on: usize = 0;
+        let mut has_fault: bool = false; //Tracks if the system has a fault
+        let mut num_of_on: usize = 0; //Number of controllers that signal `on`
 
         for n in 0..Self::NUM_OF_WAI {
             self.valve_controller[n].valve_pid_output = 
@@ -393,12 +394,17 @@ impl WingAntiIceComplex {
             
             //First, we see if the valve's open amount changes this update,
             //as a result of a change in the ovhd panel push button.
+            //If the precooler is not pressurized, a FAULT should light.
             self.update_valve_controller(context,wai_mode,n,
                 engine_systems[n].precooler_outlet_pressure() > 1.05*context.ambient_pressure());
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
             
+            //We need both controllers to signal `on` for the 
+            //system to be considered on without a fault.
             if self.valve_controller[n].controller_signals_on() {
                 num_of_on +=1;
+                //If a controller signals `on` while its corresponding valve is closed
+                //this means the system has a fault.
                 if self.is_wai_valve_open(n)  == false {
                     has_fault = true;
                 }
@@ -412,6 +418,7 @@ impl WingAntiIceComplex {
                 &mut self.wai_consumer[n], 
                 );
 
+            //The heated slats radiate energy to the ambient atmosphere.
             self.wai_consumer[n].radiate_heat_to_ambient(context);
         
             //This only changes the volume if open_amount is not zero.
