@@ -14,7 +14,7 @@ use uom::si::{
     pressure::{pascal, psi},
     ratio::{percent, ratio},
     temperature_interval,
-    thermodynamic_temperature::degree_celsius,
+    thermodynamic_temperature::{degree_celsius, kelvin},
     volume::{cubic_inch, cubic_meter, gallon},
 };
 
@@ -60,13 +60,16 @@ impl PneumaticContainer for DefaultPipe {
 
     // Adds or removes a certain amount of air
     fn change_volume(&mut self, volume: Volume) {
-        self.pressure += self.calculate_pressure_change_for_volume_change(volume);
-        self.update_temperature_for_volume_change(volume);
+        let dp = self.calculate_pressure_change_for_volume_change(volume);
+
+        self.update_temperature_for_pressure_change(dp);
+        self.pressure += dp;
     }
 
     fn update_temperature(&mut self, temperature_change: TemperatureInterval) {
+        // Pressure has to be updated before temperature as we rely on self.temperature() being the temperature before the change
+        self.update_pressure_for_temperature_change(temperature_change);
         self.temperature += temperature_change;
-//        self.update_pressure_for_temperature_change(temperature_change);
     }
 
     fn update_pressure_only(&mut self, volume: Volume) {
@@ -95,21 +98,20 @@ impl DefaultPipe {
         self.fluid.bulk_mod() * volume / self.volume()
     }
 
-    fn update_temperature_for_volume_change(&mut self, volume: Volume) {
-        // There is no powf function for SI quantities (even without units)...
-        self.temperature *= (1. + volume.get::<cubic_meter>() / self.volume.get::<cubic_meter>())
-            .powf(Self::HEAT_CAPACITY_RATIO - 1.);
-    } 
+    fn update_temperature_for_pressure_change(&mut self, pressure_change: Pressure) {
+        self.temperature *= (self.pressure.get::<psi>()
+            / (self.pressure.get::<psi>() + pressure_change.get::<psi>()))
+        .powf((1. - Self::HEAT_CAPACITY_RATIO) / Self::HEAT_CAPACITY_RATIO);
+    }
 
     fn vol_to_target(&self, target_press: Pressure) -> Volume {
         (target_press - self.pressure()) * self.volume() / self.fluid.bulk_mod()
     }
 
     fn update_pressure_for_temperature_change(&mut self, temperature_change: TemperatureInterval) {
-        self.pressure *= (self.temperature.get::<degree_celsius>()
-            / (self.temperature.get::<degree_celsius>()
-                + temperature_change.get::<temperature_interval::degree_celsius>()))
-        .powf(-Self::HEAT_CAPACITY_RATIO / (Self::HEAT_CAPACITY_RATIO - 1.));
+        self.pressure *= 1.
+            + temperature_change.get::<temperature_interval::kelvin>()
+                / self.temperature().get::<kelvin>();
     }
 }
 
@@ -626,6 +628,86 @@ impl HeatExchanger {
     }
 }
 
+pub struct VariableVolumeContainer {
+    pipe: DefaultPipe,
+}
+impl VariableVolumeContainer {
+    pub fn new(
+        starting_volume: Volume,
+        fluid: Fluid,
+        pressure: Pressure,
+        temperature: ThermodynamicTemperature,
+    ) -> Self {
+        Self {
+            pipe: DefaultPipe::new(starting_volume, fluid, pressure, temperature),
+        }
+    }
+
+    pub fn change_spatial_volume(&mut self, new_volume: Volume) {
+        self.change_volume(self.volume() - new_volume);
+        self.pipe.volume = new_volume;
+    }
+}
+impl PneumaticContainer for VariableVolumeContainer {
+    fn pressure(&self) -> Pressure {
+        self.pipe.pressure()
+    }
+
+    fn volume(&self) -> Volume {
+        self.pipe.volume()
+    }
+
+    fn temperature(&self) -> ThermodynamicTemperature {
+        self.pipe.temperature()
+    }
+
+    fn change_volume(&mut self, volume: Volume) {
+        self.pipe.change_volume(volume);
+    }
+
+    fn update_temperature(&mut self, temperature_change: TemperatureInterval) {
+        self.pipe.update_temperature(temperature_change);
+    }
+
+    fn update_pressure_only(&mut self, volume: Volume) {
+        self.pipe.pressure += self.pipe.calculate_pressure_change_for_volume_change(volume);
+    } 
+}
+
+pub struct PneumaticContainerWithValve<T: PneumaticContainer> {
+    container: T,
+    valve: DefaultValve,
+}
+impl<T: PneumaticContainer> PneumaticContainerWithValve<T> {
+    pub fn new(container: T) -> Self {
+        Self {
+            container,
+            valve: DefaultValve::new_open(),
+        }
+    }
+
+    pub fn update_flow_through_valve(
+        &mut self,
+        context: &UpdateContext,
+        connected_container: &mut impl PneumaticContainer,
+    ) {
+        self.valve
+            .update_move_fluid(context, connected_container, &mut self.container);
+    }
+
+    pub fn container(&mut self) -> &mut T {
+        &mut self.container
+    }
+
+    pub fn pressure(&self) -> Pressure {
+        self.container.pressure()
+    }
+
+    pub fn temperature(&self) -> ThermodynamicTemperature {
+        self.container.temperature()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +720,7 @@ mod tests {
             Aircraft, SimulationElement, UpdateContext,
         },
     };
+    use std::fs::File;
 
     use std::time::Duration;
     use uom::si::{
@@ -725,11 +808,29 @@ mod tests {
     }
 
     fn pressure_tolerance() -> Pressure {
-        Pressure::new::<pascal>(100.)
+        Pressure::new::<psi>(0.5)
+    }
+
+    fn temperature_tolerance() -> TemperatureInterval {
+        TemperatureInterval::new::<temperature_interval::degree_celsius>(0.5)
     }
 
     fn air() -> Fluid {
         Fluid::new(Pressure::new::<pascal>(142000.))
+    }
+
+    // It's a bit of a pain to initialize all the units manually
+    fn quick_container(
+        volume_in_cubic_meter: f64,
+        pressure_in_psi: f64,
+        temperature_in_celsius: f64,
+    ) -> DefaultPipe {
+        DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(pressure_in_psi),
+            ThermodynamicTemperature::new::<degree_celsius>(temperature_in_celsius),
+        )
     }
 
     #[test]
@@ -912,6 +1013,30 @@ mod tests {
         valve.update_move_fluid(&context, &mut from, &mut to);
 
         assert!((from.pressure() - to.pressure()).abs() < pressure_tolerance());
+    }
+
+    #[test]
+    fn valve_moving_more_volume_than_available_does_not_cause_issues() {
+        let valve = DefaultValve::new_open();
+
+        let mut from = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            Fluid::new(Pressure::new::<pascal>(142000.)),
+            Pressure::new::<psi>(100.), // really high pressure
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+        let mut to = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            Fluid::new(Pressure::new::<pascal>(142000.)),
+            Pressure::new::<psi>(1.),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+
+        let context = context(Duration::from_secs(5), Length::new::<foot>(0.));
+        valve.update_move_fluid(&context, &mut from, &mut to);
+
+        assert!(!from.temperature().is_nan());
+        assert!(!to.temperature().is_nan());
     }
 
     #[test]
@@ -1218,6 +1343,151 @@ mod tests {
 
         // We only check whether this temperature stayed the same because the other temperatures are expected to change due to compression
         assert!(supply.temperature() > ThermodynamicTemperature::new::<degree_celsius>(15.));
+    }
+
+    #[test]
+    fn pressure_increases_for_temperature_increase() {
+        let mut pipe = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(29.4),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+
+        pipe.update_temperature(TemperatureInterval::new::<
+            temperature_interval::degree_celsius,
+        >(15.));
+
+        assert_eq!(
+            pipe.temperature(),
+            ThermodynamicTemperature::new::<degree_celsius>(30.)
+        );
+        assert!(pipe.pressure() > Pressure::new::<psi>(29.4));
+    }
+
+    // This is a test case to catch a very specific bug I was running into where the supply pressure rise ridiculously high at the cost of draining the pressure in the compression chamber.
+    #[test]
+    fn heat_exchanger_no_temperature_escalates() {
+        let context = context(Duration::from_millis(16), Length::new::<foot>(0.));
+
+        let mut ts = Vec::new();
+        let mut pa = Vec::new();
+        let mut pb = Vec::new();
+        let mut pc = Vec::new();
+        let mut pd = Vec::new();
+        let mut ta = Vec::new();
+        let mut tb = Vec::new();
+        let mut tc = Vec::new();
+        let mut td = Vec::new();
+
+        let mut fake_compression_chamber = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(2.),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+        let valve = DefaultValve::new_open();
+        let mut from = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(1.),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+        let mut supply = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(1.),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+        let mut to = DefaultPipe::new(
+            Volume::new::<cubic_meter>(1.),
+            air(),
+            Pressure::new::<psi>(1.),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+
+        let precooler = HeatExchanger::new(5e-1);
+
+        for i in 1..1000 {
+            ts.push(i as f64 * 16.);
+            pa.push(fake_compression_chamber.pressure().get::<psi>());
+            pb.push(from.pressure().get::<psi>());
+            pc.push(to.pressure().get::<psi>());
+            pd.push(supply.pressure().get::<psi>());
+
+            ta.push(
+                fake_compression_chamber
+                    .temperature()
+                    .get::<degree_celsius>(),
+            );
+            tb.push(from.temperature().get::<degree_celsius>());
+            tc.push(to.temperature().get::<degree_celsius>());
+            td.push(supply.temperature().get::<degree_celsius>());
+
+            precooler.update(&context, &mut from, &mut supply, &mut to);
+            valve.update_move_fluid(&context, &mut fake_compression_chamber, &mut from);
+        }
+
+        let data = vec![ts, pa, pb, pc, pd, ta, tb, tc, td];
+        let mut file = File::create("DO NOT COMMIT 2.txt").expect("Could not create file");
+
+        use std::io::Write;
+
+        writeln!(file, "{:?}", data).expect("Could not write file");
+
+        assert!(
+            (from.temperature().get::<kelvin>() - supply.temperature().get::<kelvin>()).abs()
+                < temperature_tolerance().get::<temperature_interval::kelvin>()
+        );
+
+        assert!(
+            (fake_compression_chamber.pressure() - from.pressure()).abs() < pressure_tolerance()
+        );
+        assert!((from.pressure() - to.pressure()).abs() < pressure_tolerance());
+
+        assert!(supply.pressure() < Pressure::new::<psi>(2.));
+    }
+
+    #[test]
+    fn variable_volume_container_increases_pressure_for_volume_decrease() {
+        let mut container = VariableVolumeContainer::new(
+            Volume::new::<gallon>(10.),
+            Fluid::new(Pressure::new::<pascal>(142000.)),
+            Pressure::new::<psi>(14.7),
+            ThermodynamicTemperature::new::<degree_celsius>(15.),
+        );
+
+        assert_eq!(container.volume(), Volume::new::<gallon>(10.));
+        assert_eq!(container.pressure(), Pressure::new::<psi>(14.7));
+
+        container.change_spatial_volume(Volume::new::<gallon>(8.));
+
+        assert_eq!(container.volume(), Volume::new::<gallon>(8.));
+        assert!(container.pressure() > Pressure::new::<psi>(14.7));
+    }
+
+    #[test]
+    fn container_with_valve_behaves_like_open_valve() {
+        // System 1
+        let mut source_one = quick_container(1., 20., 15.);
+        let valve_one = DefaultValve::new_open();
+        let mut target_one = quick_container(1., 10., 15.);
+
+        // System 2
+        let mut source_two = quick_container(1., 20., 15.);
+        let mut container_with_valve =
+            PneumaticContainerWithValve::new(quick_container(1., 10., 15.));
+
+        let context = context(Duration::from_secs(1), Length::new::<foot>(0.));
+
+        valve_one.update_move_fluid(&context, &mut source_one, &mut target_one);
+        container_with_valve.update_flow_through_valve(&context, &mut source_two);
+
+        assert_eq!(source_one.pressure(), source_two.pressure());
+        assert_eq!(source_one.temperature(), source_two.temperature());
+
+        assert_eq!(target_one.pressure(), container_with_valve.pressure());
+        assert_eq!(target_one.temperature(), container_with_valve.temperature());
     }
 
     mod cross_bleed_selector_knob {
