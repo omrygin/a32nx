@@ -149,7 +149,7 @@ var A320_Neo_LowerECAM_BLEED;
             const apuSwitchState = SimVar.GetSimVarValue("L:A32NX_OVHD_APU_MASTER_SW_PB_IS_ON", "Bool") || SimVar.GetSimVarValue("L:A32NX_OVHD_PNEU_APU_BLEED_PB_IS_ON", "Bool");
             const fadecStatus = [SimVar.GetSimVarValue("L:A32NX_FADEC_POWERED_ENG1", "bool"), SimVar.GetSimVarValue("L:A32NX_FADEC_POWERED_ENG1", "bool")];
             const groundSpeed = SimVar.GetSimVarValue("GPS GROUND SPEED", "Meters per second");
-            const wingAntiInceState = SimVar.GetSimVarValue("STRUCTURAL DEICE SWITCH", "bool");
+            const wingAntiInceState = SimVar.GetSimVarValue("L:A32NX_PNEU_WING_ANTI_ICE_SYSTEM_ON", "bool");
             const packRequestedlvl = Math.min(...[SimVar.GetSimVarValue("L:A320_Neo_AIRCOND_LVL_1", "number"),
                 SimVar.GetSimVarValue("L:A320_Neo_AIRCOND_LVL_2", "number"),
                 SimVar.GetSimVarValue("L:A320_Neo_AIRCOND_LVL_3", "number")]);
