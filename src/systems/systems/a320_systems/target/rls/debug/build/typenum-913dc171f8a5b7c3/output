@@ -1,2 +1,0 @@
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=/home/omryg/a32nx/a32nx/src/systems/a320_systems/target/rls/debug/build/typenum-913dc171f8a5b7c3/out/consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=/home/omryg/a32nx/a32nx/src/systems/a320_systems/target/rls/debug/build/typenum-913dc171f8a5b7c3/out/op.rs
