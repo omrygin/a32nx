@@ -1,4 +1,5 @@
 use core::panic;
+use std::time::Duration;
 
 use crate::{
     hydraulic::{A320Hydraulic, FakeHydraulicReservoir},
@@ -30,7 +31,6 @@ use systems::{
         ControllerSignal, EngineCorrectedN1, EngineCorrectedN2, EngineFirePushButtons,
         PneumaticValve,
     }, 
-
     simulation::{
         Read, SimulationElement, SimulationElementVisitor, SimulatorReader, SimulatorWriter, Write,
     },
@@ -178,6 +178,31 @@ impl FanAirValveSignal {
 }
 
 impl ControlledPneumaticValveSignal for FanAirValveSignal {
+
+    fn target_open_amount(&self) -> Ratio {
+        self.target_open_amount
+    }
+}
+
+struct PackFlowValveSignal {
+    target_open_amount: Ratio,
+}
+impl PackFlowValveSignal {
+    fn new(target_open_amount: Ratio) -> Self {
+        Self { target_open_amount }
+    }
+
+    fn new_closed() -> Self {
+        Self::new(Ratio::new::<percent>(0.))
+    }
+
+    fn new_open() -> Self {
+        Self::new(Ratio::new::<percent>(100.))
+    }
+}
+
+impl ControlledPneumaticValveSignal for PackFlowValveSignal {
+
     fn target_open_amount(&self) -> Ratio {
         self.target_open_amount
     }
@@ -204,6 +229,7 @@ pub struct A320Pneumatic {
     green_hydraulic_reservoir_with_valve: PneumaticContainerWithValve<VariableVolumeContainer>,
     blue_hydraulic_reservoir_with_valve: PneumaticContainerWithValve<VariableVolumeContainer>,
     yellow_hydraulic_reservoir_with_valve: PneumaticContainerWithValve<VariableVolumeContainer>,
+    packs: [PackComplex; 2],
 }
 impl A320Pneumatic {
     pub fn new() -> Self {
@@ -223,9 +249,9 @@ impl A320Pneumatic {
             apu: CompressionChamber::new(Volume::new::<cubic_meter>(1.)),
             apu_bleed_air_valve: DefaultValve::new_closed(),
             apu_bleed_air_controller: ApuCompressionChamberController::new(),
+          
             //Wing anti ice
             wing_anti_ice: WingAntiIceComplex::new(),
-            
             // TODO: I don't like how I have to initialize these containers independently of the actual reservoirs.
             // If the volumes of the reservoirs were to be changed in the hydraulics code, we would have to manually change them here as well
             green_hydraulic_reservoir_with_valve: PneumaticContainerWithValve::new(
@@ -252,6 +278,7 @@ impl A320Pneumatic {
                     ThermodynamicTemperature::new::<degree_celsius>(15.),
                 ),
             ),
+            packs: [PackComplex::new(1), PackComplex::new(2)],
         }
     }
 
@@ -259,7 +286,7 @@ impl A320Pneumatic {
         &mut self,
         context: &UpdateContext,
         engines: [&T; 2],
-        overhead_panel: &A320PneumaticOverheadPanel,
+        overhead_panel: &mut A320PneumaticOverheadPanel,
         engine_fire_push_buttons: &impl EngineFirePushButtons,
         hydraulics: &A320Hydraulic,
     ) {
@@ -275,6 +302,7 @@ impl A320Pneumatic {
 
         for bmc in self.bmcs.iter_mut() {
             bmc.update(
+                context,
                 &self.engine_systems,
                 self.apu_bleed_air_valve.is_open(),
                 overhead_panel,
@@ -308,9 +336,8 @@ impl A320Pneumatic {
             hydraulics.fake_yellow_reservoir(),
         );
 
-        //Wing anti ice
-        self.wing_anti_ice.update(context,&mut self.engine_systems,overhead_panel.wing_anti_ice.mode()); 
 
+        self.wing_anti_ice.update(context,&mut self.engine_systems,overhead_panel.wing_anti_ice.mode()); 
         let (left, right) = self.engine_systems.split_at_mut(1);
         self.apu_bleed_air_valve
             .update_move_fluid(context, &mut self.apu, &mut left[0]);
@@ -324,8 +351,9 @@ impl A320Pneumatic {
             .update_flow_through_valve(context, &mut left[0]);
         self.yellow_hydraulic_reservoir_with_valve
             .update_flow_through_valve(context, &mut left[0]);
-   }
-
+        self.packs[0].update(context, &mut left[0]);
+        self.packs[1].update(context, &mut right[0]);
+    }
 
     // TODO: Returning a mutable reference here is not great. I was running into an issue with the update order:
     // - The APU turbine must know about the bleed valve being open as soon as possible to update EGT properly
@@ -373,6 +401,10 @@ impl A320Pneumatic {
     pub fn yellow_hydraulic_reservoir_pressure(&self) -> Pressure {
         self.yellow_hydraulic_reservoir_with_valve.pressure()
     }
+
+    pub fn pack_flow_valve_is_open(&self, number: usize) -> bool {
+        self.packs[number - 1].pack_flow_valve_is_open()
+    }
 }
 impl SimulationElement for A320Pneumatic {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
@@ -387,6 +419,11 @@ impl SimulationElement for A320Pneumatic {
 
         self.fadec.accept(visitor);
         self.wing_anti_ice.accept(visitor);
+
+        for pack in self.packs.iter_mut() {
+            pack.accept(visitor)
+        }
+
         visitor.visit(self);
     }
 
@@ -475,6 +512,7 @@ trait EngineBleedDataProvider {
     fn precooler_outlet_temperature(&self) -> ThermodynamicTemperature;
     fn precooler_supply_temperature(&self) -> ThermodynamicTemperature;
     fn prv_open_amount(&self) -> Ratio;
+    fn prv_is_open(&self) -> bool;
     fn hpv_open_amount(&self) -> Ratio;
     fn esv_is_open(&self) -> bool;
 }
@@ -498,30 +536,29 @@ impl BleedMonitoringComputer {
 
     fn update(
         &mut self,
+        context: &UpdateContext,
         sensors: &[EngineBleedAirSystem; 2],
         apu_bleed_valve_is_open: bool,
-        overhead_panel: &A320PneumaticOverheadPanel,
+        overhead_panel: &mut A320PneumaticOverheadPanel,
         engine_fire_push_buttons: &impl EngineFirePushButtons,
         cross_bleed_valve_is_open: bool,
     ) {
         self.main_channel.update(
+            context,
             &sensors[self.main_channel_engine_number - 1],
-            overhead_panel.engine_bleed_pb_is_auto(self.main_channel_engine_number),
             engine_fire_push_buttons.is_released(self.main_channel_engine_number),
-            overhead_panel.apu_bleed_is_on(),
             apu_bleed_valve_is_open,
-            overhead_panel.cross_bleed_mode(),
             cross_bleed_valve_is_open,
+            overhead_panel,
         );
 
         self.backup_channel.update(
+            context,
             &sensors[self.backup_channel_engine_number - 1],
-            overhead_panel.engine_bleed_pb_is_auto(self.backup_channel_engine_number),
             engine_fire_push_buttons.is_released(self.backup_channel_engine_number),
-            overhead_panel.apu_bleed_is_on(),
             apu_bleed_valve_is_open,
-            overhead_panel.cross_bleed_mode(),
             cross_bleed_valve_is_open,
+            overhead_panel,
         );
     }
 }
@@ -547,6 +584,7 @@ struct BleedMonitoringComputerChannel {
     prv_output: f64,
     cross_bleed_valve_selector: CrossBleedValveSelectorMode,
     cross_bleed_valve_is_open: bool,
+    engine_bleed_fault_light_monitor: EngineBleedFaultLightMonitor,
 }
 impl BleedMonitoringComputerChannel {
     fn new(engine_number: usize) -> Self {
@@ -569,18 +607,18 @@ impl BleedMonitoringComputerChannel {
             prv_output: 0.,
             cross_bleed_valve_selector: CrossBleedValveSelectorMode::Auto,
             cross_bleed_valve_is_open: false,
+            engine_bleed_fault_light_monitor: EngineBleedFaultLightMonitor::new(engine_number),
         }
     }
 
     fn update(
         &mut self,
+        context: &UpdateContext,
         sensors: &impl EngineBleedDataProvider,
-        is_engine_bleed_pushbutton_auto: bool,
         is_engine_fire_pushbutton_released: bool,
-        is_apu_bleed_on: bool,
         apu_bleed_valve_is_open: bool,
-        cross_bleed_valve_selector: CrossBleedValveSelectorMode,
         cross_bleed_valve_is_open: bool,
+        overhead_panel: &mut A320PneumaticOverheadPanel,
     ) {
         self.ip_compressor_pressure = sensors.ip_pressure();
         self.hp_compressor_pressure = sensors.hp_pressure();
@@ -600,14 +638,35 @@ impl BleedMonitoringComputerChannel {
         self.hpv_open_position = sensors.hpv_open_amount();
         self.esv_is_open = sensors.esv_is_open();
 
-        self.is_engine_bleed_pushbutton_auto = is_engine_bleed_pushbutton_auto;
+        self.is_engine_bleed_pushbutton_auto =
+            overhead_panel.engine_bleed_pb_is_auto(self.engine_number);
         self.is_engine_fire_pushbutton_released = is_engine_fire_pushbutton_released;
 
         self.is_apu_bleed_valve_open = apu_bleed_valve_is_open;
-        self.is_apu_bleed_on = is_apu_bleed_on;
+        self.is_apu_bleed_on = overhead_panel.apu_bleed_is_on();
 
-        self.cross_bleed_valve_selector = cross_bleed_valve_selector;
+        self.cross_bleed_valve_selector = overhead_panel.cross_bleed_mode();
         self.cross_bleed_valve_is_open = cross_bleed_valve_is_open;
+
+        self.engine_bleed_fault_light_monitor.update(
+            context,
+            !sensors.prv_is_open(),
+            !sensors.esv_is_open(),
+            !apu_bleed_valve_is_open,
+            overhead_panel.apu_bleed_is_on(),
+            overhead_panel.cross_bleed_mode() == CrossBleedValveSelectorMode::Shut,
+            !cross_bleed_valve_is_open,
+            sensors.precooler_inlet_pressure(),
+            sensors.precooler_outlet_temperature(),
+        );
+
+        self.update_fault_lights(overhead_panel);
+    }
+
+    fn update_fault_lights(&self, overhead_panel: &mut A320PneumaticOverheadPanel) {
+        if let Some(signal) = self.engine_bleed_fault_light_monitor.signal() {
+            overhead_panel.set_engine_bleed_has_fault(self.engine_number, signal.fault_light_is_on);
+        }
     }
 }
 impl ControllerSignal<IntermediatePressureValveSignal> for BleedMonitoringComputerChannel {
@@ -661,6 +720,99 @@ impl ControllerSignal<FanAirValveSignal> for BleedMonitoringComputerChannel {
         // Some(FanAirValveSignal::new_open())
         Some(FanAirValveSignal::new_closed())
         // None
+    }
+}
+
+struct FaultLightSignal {
+    fault_light_is_on: bool,
+}
+impl FaultLightSignal {
+    fn new(fault_light_is_on: bool) -> Self {
+        Self { fault_light_is_on }
+    }
+}
+
+// Such a monitor does not exist in the real aircraft, I am only putting this in for code separation concerns
+struct EngineBleedFaultLightMonitor {
+    engine_number: usize,
+    prv_not_in_commanded_position_for_eight_seconds: DelayedTrueLogicGate,
+    overtemperature_for_55_seconds: DelayedTrueLogicGate,
+    overpressure_for_15_seconds: DelayedTrueLogicGate,
+}
+impl EngineBleedFaultLightMonitor {
+    fn new(engine_number: usize) -> Self {
+        Self {
+            engine_number,
+            prv_not_in_commanded_position_for_eight_seconds: DelayedTrueLogicGate::new(
+                Duration::from_secs(8),
+            ),
+            overtemperature_for_55_seconds: DelayedTrueLogicGate::new(Duration::from_secs(55)),
+            overpressure_for_15_seconds: DelayedTrueLogicGate::new(Duration::from_secs(15)),
+        }
+    }
+
+    fn update(
+        &mut self,
+        context: &UpdateContext,
+        is_prv_fully_closed: bool,
+        is_esv_fully_closed: bool,
+        is_abv_fully_closed: bool,
+        is_apu_bleed_pb_on: bool,
+        is_cross_bleed_selector_shut: bool,
+        is_xbv_valve_fully_closed: bool,
+        precooler_inlet_pressure: Pressure,
+        precooler_outlet_temperature: ThermodynamicTemperature,
+    ) {
+        self.overtemperature_for_55_seconds.update(
+            context,
+            precooler_outlet_temperature > ThermodynamicTemperature::new::<degree_celsius>(257.),
+        );
+
+        self.overpressure_for_15_seconds.update(
+            context,
+            precooler_inlet_pressure > Pressure::new::<psi>(57.),
+        );
+
+        let should_prv_be_closed = self.should_prv_be_closed(
+            is_esv_fully_closed,
+            is_abv_fully_closed,
+            is_apu_bleed_pb_on,
+            is_cross_bleed_selector_shut,
+            is_xbv_valve_fully_closed,
+        );
+
+        self.prv_not_in_commanded_position_for_eight_seconds
+            .update(context, !is_prv_fully_closed && should_prv_be_closed);
+    }
+
+    fn should_prv_be_closed(
+        &self,
+        is_esv_fully_closed: bool,
+        is_abv_fully_closed: bool,
+        is_apu_bleed_pb_on: bool,
+        is_cross_bleed_selector_shut: bool,
+        is_xbv_valve_fully_closed: bool,
+    ) -> bool {
+        let is_apu_providing_air = !is_abv_fully_closed && is_apu_bleed_pb_on;
+        let apu_bleed_closure_condition = !is_cross_bleed_selector_shut && is_apu_providing_air;
+
+        let is_engine_one = self.engine_number == 1;
+        let cross_bleed_closure_condition = is_apu_providing_air
+            && is_engine_one
+            && is_cross_bleed_selector_shut
+            && is_xbv_valve_fully_closed;
+
+        return !is_esv_fully_closed
+            || apu_bleed_closure_condition
+            || cross_bleed_closure_condition;
+    }
+}
+impl ControllerSignal<FaultLightSignal> for EngineBleedFaultLightMonitor {
+    fn signal(&self) -> Option<FaultLightSignal> {
+        Some(FaultLightSignal::new(
+            self.prv_not_in_commanded_position_for_eight_seconds
+                .output(),
+        ))
     }
 }
 
@@ -867,6 +1019,10 @@ impl EngineBleedDataProvider for EngineBleedAirSystem {
     fn esv_is_open(&self) -> bool {
         self.es_valve.is_open()
     }
+
+    fn prv_is_open(&self) -> bool {
+        self.pr_valve.is_open()
+    }
 }
 impl SimulationElement for EngineBleedAirSystem {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
@@ -1028,6 +1184,14 @@ impl A320PneumaticOverheadPanel {
             _ => panic!("Invalid engine number"),
         }
     }
+
+    pub fn set_engine_bleed_has_fault(&mut self, engine_number: usize, has_fault: bool) {
+        match engine_number {
+            1 => self.engine_1_bleed.set_fault(has_fault),
+            2 => self.engine_2_bleed.set_fault(has_fault),
+            _ => panic!("Invalid engine number"),
+        }
+    }
 }
 impl SimulationElement for A320PneumaticOverheadPanel {
     fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T) {
@@ -1064,6 +1228,100 @@ impl SimulationElement for FullAuthorityDigitalEngineControl {
     fn read(&mut self, reader: &mut SimulatorReader) {
         self.engine_1_state = reader.read("ENGINE_STATE:1");
         self.engine_2_state = reader.read("ENGINE_STATE:2");
+    }
+}
+
+// Just sticking all of the pack related things into this.
+struct PackComplex {
+    consumer: DefaultConsumer,
+    consumer_controller: ConstantConsumerController,
+    pack_flow_valve: DefaultValve,
+    pack_flow_valve_controller: PackFlowValveController,
+}
+impl PackComplex {
+    fn new(engine_number: usize) -> Self {
+        Self {
+            consumer: DefaultConsumer::new(Volume::new::<cubic_meter>(5.)),
+            // TODO: This should be like 0.75 m^3/s which is a consumption rate of about 0.4 kg/s.
+            // Due to the way consumers work right now, this has been set to 0.
+            consumer_controller: ConstantConsumerController::new(VolumeRate::new::<
+                cubic_meter_per_second,
+            >(0.)),
+            pack_flow_valve: DefaultValve::new_closed(),
+            pack_flow_valve_controller: PackFlowValveController::new(engine_number),
+        }
+    }
+
+    fn update(&mut self, context: &UpdateContext, from: &mut impl PneumaticContainer) {
+        self.pack_flow_valve
+            .update_open_amount(&self.pack_flow_valve_controller);
+
+        self.pack_flow_valve
+            .update_move_fluid(context, from, &mut self.consumer);
+
+        self.consumer_controller.update(context);
+        self.consumer.update(&self.consumer_controller);
+    }
+
+    pub fn pack_flow_valve_is_open(&self) -> bool {
+        self.pack_flow_valve.is_open()
+    }
+}
+impl PneumaticContainer for PackComplex {
+    fn pressure(&self) -> Pressure {
+        self.consumer.pressure()
+    }
+
+    fn volume(&self) -> Volume {
+        self.consumer.volume()
+    }
+
+    fn temperature(&self) -> ThermodynamicTemperature {
+        self.consumer.temperature()
+    }
+
+    fn change_volume(&mut self, volume: Volume) {
+        self.consumer.change_volume(volume);
+    }
+
+    fn update_temperature(&mut self, temperature_change: TemperatureInterval) {
+        self.consumer.update_temperature(temperature_change);
+    }
+}
+impl SimulationElement for PackComplex {
+    fn accept<T: SimulationElementVisitor>(&mut self, visitor: &mut T)
+    where
+        Self: Sized,
+    {
+        self.pack_flow_valve_controller.accept(visitor);
+    }
+}
+
+// This will probably be removed in the future, but
+struct PackFlowValveController {
+    engine_number: usize,
+    pack_pb_is_auto: bool,
+}
+impl PackFlowValveController {
+    fn new(engine_number: usize) -> Self {
+        Self {
+            engine_number,
+            pack_pb_is_auto: true,
+        }
+    }
+}
+impl ControllerSignal<PackFlowValveSignal> for PackFlowValveController {
+    fn signal(&self) -> Option<PackFlowValveSignal> {
+        Some(match self.pack_pb_is_auto {
+            true => PackFlowValveSignal::new_open(),
+            false => PackFlowValveSignal::new_closed(),
+        })
+    }
+}
+impl SimulationElement for PackFlowValveController {
+    fn read(&mut self, reader: &mut SimulatorReader) {
+        self.pack_pb_is_auto =
+            reader.read(&format!("A32NX_AIRCOND_PACK{}_TOGGLE", self.engine_number));
     }
 }
 
@@ -1160,7 +1418,7 @@ mod tests {
             self.pneumatic.update(
                 context,
                 [&self.engine_1, &self.engine_2],
-                &self.overhead_panel,
+                &mut self.overhead_panel,
                 &self.fire_pushbuttons,
                 &self.hydraulic,
             );
@@ -1360,19 +1618,6 @@ mod tests {
             self
         }
 
-        fn set_engine_bleed_push_button_has_fault(
-            mut self,
-            number: usize,
-            has_fault: bool,
-        ) -> Self {
-            self.write(
-                &format!("OVHD_PNEU_ENG_{}_BLEED_PB_HAS_FAULT", number),
-                has_fault,
-            );
-
-            self
-        }
-
         fn set_apu_bleed_valve_signal(mut self, signal: ApuBleedAirValveSignal) -> Self {
             self.command(|a| a.apu.set_bleed_air_valve_signal(signal));
 
@@ -1438,6 +1683,21 @@ mod tests {
         fn yellow_hydraulic_reservoir_pressure(&self) -> Pressure {
             self.query(|a| a.pneumatic.yellow_hydraulic_reservoir_pressure())
         }
+
+        fn set_pack_flow_pb_is_auto(mut self, number: usize, is_auto: bool) -> Self {
+            self.write(&format!("A32NX_AIRCOND_PACK{}_TOGGLE", number), is_auto);
+
+            self
+        }
+
+        fn pack_flow_valve_is_open(&self, number: usize) -> bool {
+            self.query(|a| a.pneumatic.pack_flow_valve_is_open(number))
+        }
+
+        fn both_packs_auto(mut self) -> Self {
+            self.set_pack_flow_pb_is_auto(1, true)
+                .set_pack_flow_pb_is_auto(2, true)
+        }
     }
 
     fn test_bed() -> PneumaticTestBed {
@@ -1461,7 +1721,8 @@ mod tests {
             .in_isa_atmosphere(alt)
             .stop_eng1()
             .stop_eng2()
-            .set_bleed_air_running()
+            .both_packs_auto()
+            // .set_bleed_air_running()
             .cross_bleed_valve_selector_knob(CrossBleedValveSelectorMode::Auto);
 
         let mut ts = Vec::new();
@@ -1984,6 +2245,22 @@ mod tests {
         )
     }
 
+    #[test]
+    fn pack_flow_valve_closes_with_pack_pb_off() {
+        let mut test_bed = test_bed_with()
+            .set_pack_flow_pb_is_auto(1, true)
+            .set_pack_flow_pb_is_auto(2, false)
+            .and_run();
+
+        assert!(test_bed.pack_flow_valve_is_open(1));
+        assert!(!test_bed.pack_flow_valve_is_open(2));
+
+        test_bed = test_bed.set_pack_flow_pb_is_auto(1, false).and_run();
+
+        assert!(!test_bed.pack_flow_valve_is_open(1));
+        assert!(!test_bed.pack_flow_valve_is_open(2));
+    }
+
     mod ovhd {
         use super::*;
 
@@ -2001,22 +2278,6 @@ mod tests {
 
             assert!(!test_bed.engine_bleed_push_button_is_auto(1));
             assert!(!test_bed.engine_bleed_push_button_is_auto(2));
-        }
-
-        #[test]
-        fn ovhd_engine_bleed_push_buttons_fault_lights() {
-            let mut test_bed = test_bed().and_run();
-
-            assert!(!test_bed.engine_bleed_push_button_has_fault(1));
-            assert!(!test_bed.engine_bleed_push_button_has_fault(2));
-
-            test_bed = test_bed
-                .set_engine_bleed_push_button_has_fault(1, true)
-                .set_engine_bleed_push_button_has_fault(2, true)
-                .and_run();
-
-            assert!(test_bed.engine_bleed_push_button_has_fault(1));
-            assert!(test_bed.engine_bleed_push_button_has_fault(2));
         }
 
         #[test]
