@@ -47,8 +47,8 @@ pub struct StaticExhaust {
 impl StaticExhaust {
     const MASS_TRANSFER_SPEED: f64 = 1.;
     
-    //Unlike `DefaultValve`, we need to specify the 
-    //initial open amount everytime we initiate a new exhaust
+    // Unlike `DefaultValve`, we need to specify the 
+    // initial open amount everytime we initiate a new exhaust
     pub fn new(open_amount: Ratio) -> Self {
         Self { open_amount }
     }
