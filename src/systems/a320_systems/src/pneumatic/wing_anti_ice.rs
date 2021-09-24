@@ -89,7 +89,7 @@ impl StaticExhaust {
     }
 }
 
-/*The valve itself is a DefaultValve. The only thing
+/* The valve itself is a DefaultValve. The only thing
  * we need to re-implement is the controller, that sets
  * whether or not the valve should be open.
  *
