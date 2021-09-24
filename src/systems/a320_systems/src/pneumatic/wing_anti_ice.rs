@@ -107,9 +107,8 @@ impl StaticExhaust {
 struct WingAntiIceValveSignal {
     target_open_amount: Ratio,
 }
-
-//We can create a signal to be 100% open,
-//totally closed, or potentially something in between
+// We can create a signal to be 100% open,
+// totally closed, or potentially something in between
 impl WingAntiIceValveSignal {
     pub fn new(target_open_amount: Ratio) -> Self {
         Self { target_open_amount }
