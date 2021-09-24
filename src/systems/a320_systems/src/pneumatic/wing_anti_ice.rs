@@ -218,17 +218,17 @@ impl SimulationElement for WingAntiIceValveController {
         self.is_on_ground = reader.read(&"SIM ON GROUND");
     }
 }
-//This is the part that interacts with the valve, via DefaultValve.update_open_amount.
-//That method has if let Some(signal) = controller.signal(). The right hand side
-//is what is returned from this implementation.
+// This is the part that interacts with the valve, via DefaultValve.update_open_amount.
+// That method has if let Some(signal) = controller.signal(). The right hand side
+// is what is returned from this implementation.
 impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
     fn signal(&self) -> Option<WingAntiIceValveSignal> {
         match self.wing_anti_ice_button_pos {
             WingAntiIcePushButtonMode::Off => Some(WingAntiIceValveSignal::new_closed()),
             WingAntiIcePushButtonMode::On => {
-                //Even if the button is pushed, we need to check if either
-                //the plane is airborne or it is within the 30 second timeframe.
-                //Also, we need to check if the supplier is pressurized
+                // Even if the button is pushed, we need to check if either
+                // the plane is airborne or it is within the 30 second timeframe.
+                // Also, we need to check if the supplier is pressurized
                 // since the valve is pneumatically operated.
                 if self.supplier_pressurized && (
                     self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false)) {
