@@ -131,11 +131,9 @@ impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
     }
 }
 
-//This is the actual controller. It holds the push button status.
-//AUG29 - Implemented pressure regulation using PID. Need to tweak
-//AUG30 - Implemented the 30 second on ground test mechanism
-//AUG31 - After 30 seconds, the ON light would turn off.
-//        After takeoff, it should be turned on again.
+// This is the actual controller. It holds the push button status.
+// - After 30 seconds, the ON light would turn off.
+// - After takeoff, it should be turned on again.
 pub struct WingAntiIceValveController {
     wing_anti_ice_button_pos: WingAntiIcePushButtonMode, //The position of the button
     valve_pid: Pid<f64>, //PID controller for the valve - to regulate pressure
@@ -229,7 +227,7 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
                 // Also, we need to check if the supplier is pressurized
                 // since the valve is pneumatically operated.
                 if self.supplier_pressurized && (
-                    self.is_on_ground == false || (self.is_on_ground && self.system_test_done == false)) {
+                    !self.is_on_ground || (self.is_on_ground && !self.system_test_done)) {
                     Some(WingAntiIceValveSignal::new(Ratio::new::<ratio>(
                                 self.valve_pid_output.max(0.).min(1.))))
                 } else {
