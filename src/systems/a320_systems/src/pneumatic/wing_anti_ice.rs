@@ -124,7 +124,7 @@ impl WingAntiIceValveSignal {
 
 }
 
-//A controlled valve signal. This just lets us access the target amount
+// A controlled valve signal. This just lets us access the target amount
 impl ControlledPneumaticValveSignal for WingAntiIceValveSignal {
     fn target_open_amount(&self) -> Ratio {
         self.target_open_amount
@@ -238,18 +238,11 @@ impl ControllerSignal<WingAntiIceValveSignal> for WingAntiIceValveController {
     }
 }
 
-//End WAI valve block
-
-
-
-
-//Begin WAI Consumer block
 /* The wing anti ice is a consumer,
  * meaning it is a simple container that consumes
  * air from the bleed system, and exhausts it to the
  * ambient atmosphere. This is just the implementation 
  * of a regular container
- *
  * */
 
 pub struct WingAntiIceConsumer {
