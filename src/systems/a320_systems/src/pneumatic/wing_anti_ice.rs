@@ -30,8 +30,6 @@ use pid::Pid;
 
 use super::*;
 
-
-
 //Begin StaticExhaust block
 /* This is actually not specific for the wing anti ice,
  * and should be attached to any consumer that exhausts 
