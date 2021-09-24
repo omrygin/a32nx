@@ -58,9 +58,9 @@ impl StaticExhaust {
         self.open_amount
     }
 
-    //Compute the amount of air that is exhausted
-    //given the pressure gradient between the container
-    //and the ambient atmosphere.
+    // Compute the amount of air that is exhausted
+    // given the pressure gradient between the container
+    // and the ambient atmosphere.
     pub fn update_move_fluid(
         &self,
         context: &UpdateContext,
