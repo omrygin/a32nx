@@ -222,7 +222,6 @@ impl WingAntiIceValveController {
         self.system_test_timer
     }
 }
-
 impl SimulationElement for WingAntiIceValveController {
     fn read(&mut self, reader: &mut SimulatorReader) {
         self.is_on_ground = reader.read(&"SIM ON GROUND");
