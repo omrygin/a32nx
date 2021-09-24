@@ -35,7 +35,6 @@ pub trait PneumaticContainer {
     fn volume(&self) -> Volume; // Not the volume of gas, but the physical measurements
     fn temperature(&self) -> ThermodynamicTemperature;
     fn change_volume(&mut self, volume: Volume);
-    fn update_temperature(&mut self, temperature: TemperatureInterval);
     fn update_pressure_only(&mut self, volume: Volume);
     fn update_temperature(&mut self, temperature_change: TemperatureInterval);
 }
