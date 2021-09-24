@@ -100,11 +100,10 @@ impl StaticExhaust {
  * `ControllerSignal` trait. This trait has a single method,
  * which returns an option for the signal type (e.g. wing anti ice signal)
  * depending on the button/selector position.
- *
  **/
 
-//A WAI valve signal, just indicates what fraction
-//of the valve should be open
+// A WAI valve signal, just indicates what fraction
+// of the valve should be open
 struct WingAntiIceValveSignal {
     target_open_amount: Ratio,
 }
