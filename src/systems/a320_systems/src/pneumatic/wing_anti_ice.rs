@@ -355,8 +355,8 @@ impl WingAntiIceComplex {
         engine_systems: &mut [EngineBleedAirSystem; 2],
         wai_mode: WingAntiIcePushButtonMode,
     ) {
-        let mut has_fault: bool = false; //Tracks if the system has a fault
-        let mut num_of_on: usize = 0; //Number of controllers that signal `on`
+        let mut has_fault: bool = false; // Tracks if the system has a fault
+        let mut num_of_on: usize = 0; // Number of controllers that signal `on`
 
         for n in 0..Self::NUM_OF_WAI {
             self.valve_controller[n].valve_pid_output = 
@@ -369,7 +369,7 @@ impl WingAntiIceComplex {
             // as a result of a change in the ovhd panel push button.
             // If the precooler is not pressurized, a FAULT should light.
             self.update_valve_controller(context, wai_mode, n,
-                engine_systems[n].precooler_outlet_pressure().get::<psi>() > 1.05*context.ambient_pressure().get::<psi>());
+                engine_systems[n].precooler_outlet_pressure() > 1.05 * context.ambient_pressure();
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
             
             //We need both controllers to signal `on` for the 
