@@ -304,7 +304,6 @@ impl WingAntiIceConsumer {
  * 
  * There are two valve controllers, one for each.
  * Still need to figure out whether this is how it works.
- * 
  * */
 pub struct WingAntiIceComplex {
     wai_exhaust: [StaticExhaust; 2],
@@ -314,9 +313,7 @@ pub struct WingAntiIceComplex {
     wai_system_has_fault: bool,
     wai_system_on: bool,
 }
-
 impl WingAntiIceComplex {
-
     const NUM_OF_WAI: usize = 2;
     pub fn new() -> Self {
         Self {
@@ -351,7 +348,7 @@ impl WingAntiIceComplex {
         self.wai_consumer[number].temperature()
     }
     
-    //This is where the action happens
+    // This is where the action happens
     pub fn update(
         &mut self,
         context: &UpdateContext,
@@ -368,9 +365,9 @@ impl WingAntiIceComplex {
                 )
                 .output;
             
-            //First, we see if the valve's open amount changes this update,
-            //as a result of a change in the ovhd panel push button.
-            //If the precooler is not pressurized, a FAULT should light.
+            // First, we see if the valve's open amount changes this update,
+            // as a result of a change in the ovhd panel push button.
+            // If the precooler is not pressurized, a FAULT should light.
             self.update_valve_controller(context,wai_mode,n,
                 engine_systems[n].precooler_outlet_pressure().get::<psi>() > 1.05*context.ambient_pressure().get::<psi>());
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
