@@ -273,11 +273,9 @@ impl PneumaticContainer for WingAntiIceConsumer {
     fn update_pressure_only(&mut self, volume: Volume) { 
         self.pipe.update_pressure_only(volume);
     }
-
 }
 
 impl WingAntiIceConsumer {
-
     const CONDUCTION_RATE: f64 = 0.1;
     pub fn new(volume: Volume) -> Self {
         Self {
@@ -285,7 +283,7 @@ impl WingAntiIceConsumer {
                 Fluid::new(Pressure::new::<pascal>(142000.)),
                 Pressure::new::<psi>(14.7),
                 ThermodynamicTemperature::new::<degree_celsius>(15.),
-                ),
+            ),
         }
     }
     // Radiate heat to the ambient atmosphere
@@ -294,15 +292,11 @@ impl WingAntiIceConsumer {
     pub fn radiate_heat_to_ambient(&mut self,context: &UpdateContext) {
         let delta_t: TemperatureInterval = TemperatureInterval::new::<temperature_interval::degree_celsius>(
             self.temperature().get::<degree_celsius>() - context.ambient_temperature().get::<degree_celsius>()
-            );
+        );
 
         self.update_temperature(-delta_t*context.delta_as_secs_f64()*Self::CONDUCTION_RATE);
     }
-
 }
-//End WAI consumer block
-
-//Begin WAI Complex block
 /* The entire WAI system could have been hard coded
  * into A320Pneumatic, however I think this is cleaner.
  * The complex includes both WAI parts. Each part contains 
