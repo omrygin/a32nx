@@ -176,7 +176,6 @@ impl FanAirValveSignal {
 }
 
 impl ControlledPneumaticValveSignal for FanAirValveSignal {
-
     fn target_open_amount(&self) -> Ratio {
         self.target_open_amount
     }
