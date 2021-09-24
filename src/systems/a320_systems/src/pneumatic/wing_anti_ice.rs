@@ -39,7 +39,7 @@ use super::*;
  * is an infinite pressure bath.
  * */
 
-//Just holds how much the exhaust is open.
+// Just holds how much the exhaust is open.
 pub struct StaticExhaust {
     open_amount: Ratio,
 }
