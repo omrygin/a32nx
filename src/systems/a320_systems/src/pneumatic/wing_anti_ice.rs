@@ -308,9 +308,9 @@ impl WingAntiIceConsumer {
                 ),
         }
     }
-    //Radiate heat to the ambient atmosphere
-    //according to Newton's law of cooling
-    //dT/dt = -(T-T_atmo) / tau
+    // Radiate heat to the ambient atmosphere
+    // according to Newton's law of cooling
+    // dT/dt = -(T-T_atmo) / tau
     pub fn radiate_heat_to_ambient(&mut self,context: &UpdateContext) {
         let delta_t: TemperatureInterval = TemperatureInterval::new::<temperature_interval::degree_celsius>(
             self.temperature().get::<degree_celsius>() - context.ambient_temperature().get::<degree_celsius>()
