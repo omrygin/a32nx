@@ -422,28 +422,17 @@ impl SimulationElement for WingAntiIceComplex {
 
     fn write(&self, writer: &mut SimulatorWriter) {
         writer.write("PNEU_WING_ANTI_ICE_SYSTEM_ON", self.wai_system_on);
-        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT",self.wai_system_has_fault);
+        writer.write("PNEU_WING_ANTI_ICE_HAS_FAULT", self.wai_system_has_fault);
         writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[0].pressure());
         writer.write("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_PRESSURE", self.wai_consumer[1].pressure());
         writer.write("PNEU_LEFT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[0].temperature());
         writer.write("PNEU_RIGHT_WING_ANTI_ICE_CONSUMER_TEMPERATURE", self.wai_consumer[1].temperature());
-        writer.write("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN",self.is_wai_valve_open(0));
-        writer.write("PNEU_RIGHT_WING_ANTI_ICE_VALVE_OPEN",self.is_wai_valve_open(1));
-
+        writer.write("PNEU_LEFT_WING_ANTI_ICE_VALVE_OPEN", self.is_wai_valve_open(0));
+        writer.write("PNEU_RIGHT_WING_ANTI_ICE_VALVE_OPEN", self.is_wai_valve_open(1));
     }
 }
-//End WAI Complex block
-
-
-//Begin simple tests
 
 mod tests {
-
-    #[test]
-    fn dummy_test() {
-        assert!(1 == 1);
-    }
-    
     use super::*;
     use systems::{
         engine::leap_engine::LeapEngine,
