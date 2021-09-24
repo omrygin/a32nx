@@ -199,7 +199,6 @@ impl PackFlowValveSignal {
 }
 
 impl ControlledPneumaticValveSignal for PackFlowValveSignal {
-
     fn target_open_amount(&self) -> Ratio {
         self.target_open_amount
     }
@@ -247,7 +246,6 @@ impl A320Pneumatic {
             apu_bleed_air_valve: DefaultValve::new_closed(),
             apu_bleed_air_controller: ApuCompressionChamberController::new(),
           
-            //Wing anti ice
             wing_anti_ice: WingAntiIceComplex::new(),
             // TODO: I don't like how I have to initialize these containers independently of the actual reservoirs.
             // If the volumes of the reservoirs were to be changed in the hydraulics code, we would have to manually change them here as well
@@ -334,7 +332,7 @@ impl A320Pneumatic {
         );
 
 
-        self.wing_anti_ice.update(context,&mut self.engine_systems,overhead_panel.wing_anti_ice.mode()); 
+        self.wing_anti_ice.update(context, &mut self.engine_systems, overhead_panel.wing_anti_ice.mode()); 
         let (left, right) = self.engine_systems.split_at_mut(1);
         self.apu_bleed_air_valve
             .update_move_fluid(context, &mut self.apu, &mut left[0]);
@@ -915,7 +913,7 @@ impl EngineBleedAirSystem {
         self.engine_starter_consumer
             .update(&self.engine_starter_consumer_controller);
 
-      // Update valves (open amount)
+       // Update valves (open amount)
         self.ip_valve.update_open_amount(ipv_controller);
         self.hp_valve.update_open_amount(hpv_controller);
         self.pr_valve.update_open_amount(prv_controller);
