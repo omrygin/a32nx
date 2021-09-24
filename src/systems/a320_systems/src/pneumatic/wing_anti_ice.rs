@@ -78,7 +78,7 @@ impl StaticExhaust {
         );
     } 
     
-    //Exhaust a certain amount of volume
+    // Exhaust a certain amount of volume
     fn exhaust_volume(  
             &self,
             context: &UpdateContext,
