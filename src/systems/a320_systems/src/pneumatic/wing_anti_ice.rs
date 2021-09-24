@@ -372,45 +372,38 @@ impl WingAntiIceComplex {
                 engine_systems[n].precooler_outlet_pressure() > 1.05 * context.ambient_pressure();
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
             
-            //We need both controllers to signal `on` for the 
-            //system to be considered on without a fault.
+            // We need both controllers to signal `on` for the 
+            // system to be considered on without a fault.
             if self.valve_controller[n].controller_signals_on() {
-                num_of_on +=1;
-                //If a controller signals `on` while its corresponding valve is closed
-                //this means the system has a fault.
-                if self.is_wai_valve_open(n)  == false {
+                num_of_on += 1;
+                // If a controller signals `on` while its corresponding valve is closed
+                // this means the system has a fault.
+                if !self.is_wai_valve_open(n) {
                     has_fault = true;
                 }
             }
 
-            //An exhaust tick always happens, no matter what 
-            //the valve's state is
-            //
+            // An exhaust tick always happens, no matter what 
+            // the valve's state is
             self.wai_exhaust[n].update_move_fluid(
                 context, 
                 &mut self.wai_consumer[n], 
-                );
+            );
 
-            //The heated slats radiate energy to the ambient atmosphere.
+            // The heated slats radiate energy to the ambient atmosphere.
             self.wai_consumer[n].radiate_heat_to_ambient(context);
         
-            //This only changes the volume if open_amount is not zero.
+            // This only changes the volume if open_amount is not zero.
             self.wai_valve[n].update_move_fluid_with_temperature(
                 context, 
                 &mut engine_systems[n].precooler_outlet_pipe, 
-                &mut self.wai_consumer[n]);
-
+                &mut self.wai_consumer[n],
+            );
         }
 
         self.wai_system_has_fault = has_fault;
         
-        if num_of_on < 2 {
-            self.wai_system_on = false;
-        } else {
-            if !has_fault {
-                self.wai_system_on = true;
-            }
-        }
+        self.wai_system_on = (num_of_on == Self::NUM_OF_WAI) && !has_fault
 
     }
 
