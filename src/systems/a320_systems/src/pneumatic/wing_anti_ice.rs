@@ -56,7 +56,7 @@ impl StaticExhaust {
         Self { open_amount }
     }
     
-    //Returns the open amount 
+    // Returns the open amount 
     pub fn open_amount(&self) -> Ratio {
         self.open_amount
     }
