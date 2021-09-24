@@ -368,7 +368,7 @@ impl WingAntiIceComplex {
             // First, we see if the valve's open amount changes this update,
             // as a result of a change in the ovhd panel push button.
             // If the precooler is not pressurized, a FAULT should light.
-            self.update_valve_controller(context,wai_mode,n,
+            self.update_valve_controller(context, wai_mode, n,
                 engine_systems[n].precooler_outlet_pressure().get::<psi>() > 1.05*context.ambient_pressure().get::<psi>());
             self.wai_valve[n].update_open_amount(&self.valve_controller[n]);
             
