@@ -176,9 +176,9 @@ impl DefaultValve {
         self.fluid_flow = fluid_to_move / context.delta_as_time();
     }
 
-    //This method is the same as update_move_fluid
-    //but also updates the temperature of `to`
-    //according to a weighted mean
+    // This method is the same as update_move_fluid
+    // but also updates the temperature of `to`
+    // according to a weighted mean
     pub fn update_move_fluid_with_temperature(
         &self,
         context: &UpdateContext,
