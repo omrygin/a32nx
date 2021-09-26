@@ -103,6 +103,8 @@ pub struct FlapSlatAssembly {
     position_id: String,
     angle_left_id: String,
     angle_right_id: String,
+    angle_left_percent_id: String,
+    angle_right_percent_id: String,
 
     flap_control_arm_position: Angle,
 
@@ -145,6 +147,8 @@ impl FlapSlatAssembly {
             position_id: format!("HYD_{}_POSITION", id),
             angle_left_id: format!("LEFT_{}_ANGLE", id),
             angle_right_id: format!("RIGHT_{}_ANGLE", id),
+            angle_left_percent_id: format!("LEFT_{}_POSITION_PERCENT", id),
+            angle_right_percent_id: format!("RIGHT_{}_POSITION_PERCENT", id),
             flap_control_arm_position: Angle::new::<radian>(0.),
             max_synchro_gear_position,
             final_requested_synchro_gear_position: Angle::new::<radian>(0.),
@@ -350,7 +354,7 @@ impl FlapSlatAssembly {
     }
 
     /// Gets flap surface angle from current Feedback Position Pickup Unit (FPPU) position
-    fn flap_surface_angle(&self) -> Angle {
+    pub fn flap_surface_angle(&self) -> Angle {
         Angle::new::<degree>(interpolation(
             &self.synchro_gear_breakpoints,
             &self.final_flap_angle_carac,
@@ -392,8 +396,11 @@ impl SimulationElement for FlapSlatAssembly {
         );
 
         let flaps_surface_angle = self.flap_surface_angle();
+        let max_angle = self.final_flap_angle_carac[self.final_flap_angle_carac.len()-1];
         writer.write(&self.angle_left_id, flaps_surface_angle.get::<degree>());
         writer.write(&self.angle_right_id, flaps_surface_angle.get::<degree>());
+        writer.write(&self.angle_left_percent_id, 100.*flaps_surface_angle.get::<degree>() / max_angle);
+        writer.write(&self.angle_right_percent_id, 100.*flaps_surface_angle.get::<degree>() / max_angle);
     }
 }
 
